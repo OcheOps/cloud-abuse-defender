@@ -37,6 +37,9 @@ scoped response executor (future, disabled by default)
 ## Detector
 `internal/detect` groups indicator events by principal (ARN, else masked access key) and splits them into findings at gaps longer than the correlation window. Confidence is a noisy-OR over distinct indicator weights plus attack-chain rules, so the score is bounded below 100, repeating a signal can't inflate it, and every point traces to named contributors and event IDs. The detector supplies `ThreatConfidence` to the policy engine; it never decides on containment itself.
 
+## Evidence store
+`internal/evidence` is an append-only JSON-lines log where each record carries the SHA-256 hash of the one before it. Detection writes a record per finding before any alert goes out, so each alert can carry the hash of the record that explains it; delivery attempts are recorded after. Records carry `policy.Version` and `detect.WeightsVersion`, and a test fails if scoring weights change without a version bump. Approval and containment, when built, should append to this same chain.
+
 ## Cost forecasting
 The policy engine projects `hourly_rate * forecast_hours`. The hourly rate can be supplied directly, or derived by `internal/cost` from observed Bedrock input/output token counts and a versioned, region-specific pricing table (USD per million tokens). The estimate records the pricing version it used, and any forecast warning (stale or not-yet-effective pricing, unpriced models, a too-short observation window) forces the policy decision to alert-only. Real AWS Bedrock forecasting should derive usage from observed request/token metrics and model-specific rates, account for provisioned throughput and discounts, and clearly distinguish billed costs from estimates. Cloud billing data can be delayed.
 

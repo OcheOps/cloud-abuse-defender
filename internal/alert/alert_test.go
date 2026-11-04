@@ -268,3 +268,28 @@ func TestSlackTitleShowsUpdate(t *testing.T) {
 		}
 	}
 }
+
+func TestAlertIncidentAndEvidence(t *testing.T) {
+	a := FromFinding(finding(), nil, nil, t0)
+	if a.IncidentID != finding().IncidentID() || !strings.HasPrefix(a.IncidentID, "inc_") {
+		t.Fatalf("incident ID not set: %q", a.IncidentID)
+	}
+	body, _ := Render(FormatSlack, a)
+	if strings.Contains(string(body), "Evidence record") {
+		t.Fatal("no evidence line expected without a hash")
+	}
+	a.EvidenceHash = strings.Repeat("ab", 32)
+	body, _ = Render(FormatSlack, a)
+	var msg slackPayload
+	if err := json.Unmarshal(body, &msg); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(msg.Blocks[1].Text.Text, a.IncidentID) || len(msg.Blocks[2].Elements) != 2 ||
+		msg.Blocks[2].Elements[1].Text != "Evidence record "+strings.Repeat("ab", 8) {
+		t.Fatalf("unexpected message: %+v", msg)
+	}
+	hook, _ := Render(FormatWebhook, a)
+	if !strings.Contains(string(hook), `"evidence_hash":"`+a.EvidenceHash+`"`) {
+		t.Fatalf("webhook payload must carry the full hash: %s", hook)
+	}
+}

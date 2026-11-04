@@ -15,6 +15,8 @@ import (
 	"github.com/OcheOps/cloud-abuse-defender/internal/alert"
 	"github.com/OcheOps/cloud-abuse-defender/internal/cloudwatch"
 	"github.com/OcheOps/cloud-abuse-defender/internal/cost"
+	"github.com/OcheOps/cloud-abuse-defender/internal/detect"
+	"github.com/OcheOps/cloud-abuse-defender/internal/evidence"
 	"github.com/OcheOps/cloud-abuse-defender/internal/policy"
 )
 
@@ -593,6 +595,123 @@ func TestRunBedrockErrors(t *testing.T) {
 			_, code, stderr := runCmd(t, tc.args...)
 			if code != 2 || !strings.Contains(stderr, tc.want) {
 				t.Fatalf("exit %d, stderr %q, want %q", code, stderr, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunDetectEvidenceLog(t *testing.T) {
+	fail := false
+	sent, done := hookServer(t, &fail)
+	defer done()
+	logPath := filepath.Join(t.TempDir(), "evidence.jsonl")
+
+	got, code, stderr := runDetectCmd(t, "-file", incidentLog, "-evidence-log", logPath,
+		"-usage", exampleUsage, "-pricing", examplePricing, "-notify", "webhook")
+	if code != 0 || *sent != 1 {
+		t.Fatalf("exit %d sent %d: %s", code, *sent, stderr)
+	}
+	// 2 finding records + 1 notification (the 36%% finding is skipped, not delivered).
+	if got.EvidenceHead == nil || got.EvidenceHead.Records != 3 {
+		t.Fatalf("unexpected evidence head: %+v", got.EvidenceHead)
+	}
+	if got.Findings[0].IncidentID == "" || got.Findings[0].IncidentID == got.Findings[1].IncidentID {
+		t.Fatalf("incident IDs missing or not distinct: %+v", got.Findings)
+	}
+
+	var recs []evidence.Record
+	raw, _ := os.ReadFile(logPath)
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var r evidence.Record
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatal(err)
+		}
+		recs = append(recs, r)
+	}
+	if recs[0].Kind != "finding" || recs[2].Kind != "notification" || recs[0].IncidentID != got.Findings[0].IncidentID {
+		t.Fatalf("unexpected records: %+v", recs)
+	}
+	var fe findingEvidence
+	if err := json.Unmarshal(recs[0].Data, &fe); err != nil {
+		t.Fatal(err)
+	}
+	if fe.PolicyVersion != policy.Version || fe.WeightsVersion != detect.WeightsVersion || fe.PricingVersion != "example-2026-11" ||
+		fe.Decision == nil || len(fe.Finding.Contributors) == 0 {
+		t.Fatalf("finding record incomplete: %+v", fe)
+	}
+	var ne notificationEvidence
+	if err := json.Unmarshal(recs[2].Data, &ne); err != nil {
+		t.Fatal(err)
+	}
+	if ne.Status != "sent" || ne.FindingRecord != recs[0].Hash {
+		t.Fatalf("notification record not linked to its finding: %+v", ne)
+	}
+	if strings.Contains(string(raw), "/hook") {
+		t.Fatal("webhook URL leaked into the evidence log")
+	}
+
+	// A second run appends to the same chain.
+	again, code, _ := runDetectCmd(t, "-file", incidentLog, "-evidence-log", logPath)
+	if code != 0 || again.EvidenceHead.Records != 5 {
+		t.Fatalf("second run must append: %+v", again.EvidenceHead)
+	}
+
+	out, code, stderr := runCmd(t, "evidence-verify", "-file", logPath, "-expect-record", recs[0].Hash)
+	if code != 0 || !strings.Contains(out, again.EvidenceHead.Hash) {
+		t.Fatalf("verify: exit %d %s %s", code, out, stderr)
+	}
+}
+
+func TestRunDetectEvidenceAlertCarriesHash(t *testing.T) {
+	var body []byte
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { body, _ = io.ReadAll(r.Body) }))
+	defer srv.Close()
+	old := httpClient
+	httpClient = srv.Client()
+	t.Cleanup(func() { httpClient = old })
+	t.Setenv(webhookEnv, srv.URL+"/hook")
+	logPath := filepath.Join(t.TempDir(), "evidence.jsonl")
+
+	if _, code, stderr := runDetectCmd(t, "-file", incidentLog, "-evidence-log", logPath, "-notify", "webhook"); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	var a alert.Alert
+	if err := json.Unmarshal(body, &a); err != nil {
+		t.Fatal(err)
+	}
+	if a.EvidenceHash == "" || a.IncidentID == "" {
+		t.Fatalf("alert missing evidence hash or incident ID: %+v", a)
+	}
+	if out, code, stderr := runCmd(t, "evidence-verify", "-file", logPath, "-expect-record", a.EvidenceHash); code != 0 {
+		t.Fatalf("alert hash must be in the log: %d %s %s", code, out, stderr)
+	}
+}
+
+func TestRunEvidenceVerifyFailures(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "evidence.jsonl")
+	if _, code, _ := runDetectCmd(t, "-file", incidentLog, "-evidence-log", logPath); code != 0 {
+		t.Fatal("setup failed")
+	}
+	raw, _ := os.ReadFile(logPath)
+	tampered := filepath.Join(t.TempDir(), "tampered.jsonl")
+	os.WriteFile(tampered, []byte(strings.Replace(string(raw), "ci-deploy", "ci-deplox", 1)), 0o600)
+
+	for name, tc := range map[string]struct {
+		args []string
+		code int
+		want string
+	}{
+		"no file flag":                {[]string{"evidence-verify"}, 2, "-file is required"},
+		"extra args":                  {[]string{"evidence-verify", "-file", logPath, "x"}, 2, "unexpected arguments"},
+		"missing log":                 {[]string{"evidence-verify", "-file", logPath + ".nope"}, 1, "does not exist"},
+		"tampered log":                {[]string{"evidence-verify", "-file", tampered}, 1, "hash mismatch"},
+		"unknown record":              {[]string{"evidence-verify", "-file", logPath, "-expect-record", "deadbeef"}, 1, "has no record deadbeef"},
+		"detect refuses tampered log": {[]string{"detect", "-file", incidentLog, "-evidence-log", tampered}, 2, "hash mismatch"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, code, stderr := runCmd(t, tc.args...)
+			if code != tc.code || !strings.Contains(stderr, tc.want) {
+				t.Fatalf("exit %d (want %d), stderr %q, want %q", code, tc.code, stderr, tc.want)
 			}
 		})
 	}

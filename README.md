@@ -28,7 +28,7 @@ Initial components:
 3. **Policy engine (implemented)**: pure Go spending projection + risk gate.
    **Bedrock cost estimator (implemented)**: prices observed token usage with a versioned pricing table and flags unreliable forecasts.
 4. Response orchestration: **Slack/webhook alerts (implemented)**; approval workflows and reversible scoped containment planned.
-5. Evidence store (planned): immutable incident records with sensitive fields redacted.
+5. **Evidence store (implemented)**: tamper-evident, hash-chained incident records with the policy and weight versions behind each decision.
 
 ## Try the policy engine
 
@@ -194,6 +194,29 @@ A finding matches an earlier alert when it's the same principal and the time ran
 | `duplicate` | unchanged and recent | not sent (`suppressed_duplicate`) |
 
 Only delivered alerts are recorded, so a failed send is retried on the next run, and dry runs never write the file. The file is written atomically with `0600` permissions, keeps 30 days of history, and contains principal ARNs, so treat it as sensitive. A corrupt state file stops the run instead of being silently reset. It assumes one writer at a time: two runs sharing a file at once may both send.
+
+### Keep an evidence log
+
+```sh
+go run ./cmd/cad detect -file trail.json.gz -usage usage.json -pricing pricing.json \
+  -notify slack -alert-state cad-alert-state.json -evidence-log cad-evidence.jsonl
+go run ./cmd/cad evidence-verify -file cad-evidence.jsonl
+```
+
+`-evidence-log` appends one JSON line per finding, and one per delivery attempt (sent, failed or suppressed; dry runs and skipped findings aren't recorded). Finding records hold everything needed to explain the decision later:
+- the full finding, including contributors and event IDs;
+- the policy decision, pricing version, hourly rate and forecast warnings;
+- `policy_version` and `weights_version`.
+
+Each record includes the SHA-256 hash of the record before it, so editing, deleting, inserting or reordering any record breaks the chain at that point. `cad detect` won't append to a log that fails verification.
+
+The chain is tamper-evident, not tamper-proof: anyone who can write the file could rebuild it from scratch or drop the newest records. To catch that, every alert carries its `incident_id` and the `evidence_hash` of the record behind it, which puts a copy of the chain's state in Slack or your webhook receiver. Check a hash you kept with:
+
+```sh
+go run ./cmd/cad evidence-verify -file cad-evidence.jsonl -expect-record <evidence_hash>
+```
+
+The log contains principal ARNs, source IPs and event IDs, is written `0600`, and assumes one writer at a time.
 
 ## Roadmap
 
