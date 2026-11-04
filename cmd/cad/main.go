@@ -4,20 +4,24 @@
 //	cad [flags]                      evaluate the policy for one confidence and spend rate
 //	cad cloudtrail -file <log>       replay a CloudTrail log into redacted events with indicators
 //	cad detect -file <log> [flags]   correlate a CloudTrail log into scored findings and,
-//	                                 given a cost source, a policy decision per finding
+//	                                 given a cost source, a policy decision per finding;
+//	                                 -notify slack|webhook sends alerts to $CAD_WEBHOOK_URL
 //
 // The hourly spend comes either from -hourly-rate, or from a Bedrock usage
 // observation priced with a versioned table (-usage and -pricing).
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"time"
 
+	"github.com/OcheOps/cloud-abuse-defender/internal/alert"
 	"github.com/OcheOps/cloud-abuse-defender/internal/cloudtrail"
 	"github.com/OcheOps/cloud-abuse-defender/internal/cost"
 	"github.com/OcheOps/cloud-abuse-defender/internal/detect"
@@ -180,9 +184,27 @@ type detectedFinding struct {
 	Decision *policy.Decision `json:"decision,omitempty"`
 }
 
+// webhookEnv names the environment variable holding the webhook URL. The URL
+// is a secret, so it is never accepted as a flag (flags leak into shell
+// history and process listings) and never printed.
+const webhookEnv = "CAD_WEBHOOK_URL"
+
+// httpClient is used for alert delivery; tests replace it.
+var httpClient = &http.Client{Timeout: 10 * time.Second}
+
+type notification struct {
+	Principal string    `json:"principal"`
+	First     time.Time `json:"first_event_time"`
+	// Status is "sent", "failed", "dry_run" or "skipped_below_threshold".
+	Status  string          `json:"status"`
+	Error   string          `json:"error,omitempty"`
+	Payload json.RawMessage `json:"payload,omitempty"`
+}
+
 type detectOutput struct {
-	Findings []detectedFinding `json:"findings"`
-	Estimate *cost.Estimate    `json:"estimate,omitempty"`
+	Findings      []detectedFinding `json:"findings"`
+	Estimate      *cost.Estimate    `json:"estimate,omitempty"`
+	Notifications []notification    `json:"notifications,omitempty"`
 }
 
 func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
@@ -190,6 +212,9 @@ func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
 	fs.SetOutput(stderr)
 	path := fs.String("file", "", "CloudTrail log file (S3 delivery format, .json or .json.gz); required")
 	window := fs.Duration("window", detect.DefaultWindow, "largest gap between a principal's indicator events within one finding")
+	notify := fs.String("notify", "", `send alerts as "slack" or "webhook" to $`+webhookEnv)
+	notifyMin := fs.Float64("notify-min-confidence", 50, "only alert on findings at or above this confidence")
+	dryRun := fs.Bool("notify-dry-run", false, "render alert payloads into the output instead of sending them")
 	cf := registerCostFlags(fs)
 	set, ok := parseFlags(fs, args, stderr)
 	if !ok {
@@ -198,6 +223,34 @@ func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
 	if *path == "" {
 		fmt.Fprintln(stderr, "-file is required")
 		return 2
+	}
+	var sender *alert.Sender
+	switch {
+	case *notify == "" && (*dryRun || set["notify-min-confidence"]):
+		fmt.Fprintln(stderr, "-notify-dry-run and -notify-min-confidence require -notify")
+		return 2
+	case *notify != "":
+		format, err := alert.ParseFormat(*notify)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+		if *notifyMin < 0 || *notifyMin > 100 {
+			fmt.Fprintln(stderr, "-notify-min-confidence must be between 0 and 100")
+			return 2
+		}
+		sender = &alert.Sender{Format: format, Client: httpClient}
+		if !*dryRun {
+			sender.URL = os.Getenv(webhookEnv)
+			if sender.URL == "" {
+				fmt.Fprintf(stderr, "-notify requires $%s (or use -notify-dry-run)\n", webhookEnv)
+				return 2
+			}
+			if err := sender.Validate(); err != nil {
+				fmt.Fprintln(stderr, err)
+				return 2
+			}
+		}
 	}
 	in, est, err := cf.resolve(set, now)
 	if err != nil {
@@ -233,7 +286,45 @@ func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
 		}
 		out.Findings = append(out.Findings, df)
 	}
-	return encode(stdout, stderr, out)
+
+	code := 0
+	if sender != nil {
+		for _, df := range out.Findings {
+			n := notification{Principal: df.Principal, First: df.First}
+			a := alert.FromFinding(df.Finding, df.Decision, est, now)
+			switch {
+			case df.Confidence < *notifyMin:
+				n.Status = "skipped_below_threshold"
+			case *dryRun:
+				payload, err := alert.Render(sender.Format, a)
+				if err != nil {
+					fmt.Fprintln(stderr, err)
+					return 1
+				}
+				n.Status, n.Payload = "dry_run", payload
+			default:
+				ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+				err := sender.Send(ctx, a)
+				cancel()
+				if err != nil {
+					n.Status, n.Error = "failed", err.Error()
+					code = 1
+				} else {
+					n.Status = "sent"
+				}
+			}
+			out.Notifications = append(out.Notifications, n)
+		}
+	}
+	// Findings are always printed; a failed delivery is reported in the
+	// output and the exit status rather than hiding the detection result.
+	if c := encode(stdout, stderr, out); c != 0 {
+		return c
+	}
+	if code != 0 {
+		fmt.Fprintln(stderr, "one or more alerts could not be delivered")
+	}
+	return code
 }
 
 func encode(stdout, stderr io.Writer, v any) int {

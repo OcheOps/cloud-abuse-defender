@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -291,6 +294,102 @@ func TestRunDetectErrors(t *testing.T) {
 			_, code, stderr := runDetectCmd(t, tc.args...)
 			if code != 2 || !strings.Contains(stderr, tc.want) {
 				t.Fatalf("exit %d, stderr %q, want %q", code, stderr, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunDetectNotifyDryRun(t *testing.T) {
+	t.Setenv(webhookEnv, "")
+	got, code, stderr := runDetectCmd(t, "-file", incidentLog, "-notify", "slack", "-notify-dry-run")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if len(got.Notifications) != 2 {
+		t.Fatalf("want 2 notifications, got %+v", got.Notifications)
+	}
+	top, root := got.Notifications[0], got.Notifications[1]
+	if top.Status != "dry_run" || !json.Valid(top.Payload) || !strings.Contains(string(top.Payload), "98.6% confidence") {
+		t.Fatalf("unexpected top notification: %+v", top)
+	}
+	if root.Status != "skipped_below_threshold" || root.Payload != nil {
+		t.Fatalf("36%% finding must be skipped at the default threshold: %+v", root)
+	}
+}
+
+func TestRunDetectNotifySends(t *testing.T) {
+	var bodies [][]byte
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, b)
+	}))
+	defer srv.Close()
+	old := httpClient
+	httpClient = srv.Client()
+	t.Cleanup(func() { httpClient = old })
+	t.Setenv(webhookEnv, srv.URL+"/hook")
+
+	got, code, stderr := runDetectCmd(t, "-file", incidentLog, "-notify", "webhook", "-notify-min-confidence", "0",
+		"-usage", exampleUsage, "-pricing", examplePricing)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if len(bodies) != 2 || got.Notifications[0].Status != "sent" || got.Notifications[1].Status != "sent" {
+		t.Fatalf("want 2 sent alerts, got %d bodies, %+v", len(bodies), got.Notifications)
+	}
+	if !strings.Contains(string(bodies[0]), `"schema":"cad.alert.v1"`) || !strings.Contains(string(bodies[0]), `"pricing_version":"example-2026-11"`) {
+		t.Fatalf("unexpected webhook body: %s", bodies[0])
+	}
+}
+
+func TestRunDetectNotifyFailureStillPrintsFindings(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+	old := httpClient
+	httpClient = srv.Client()
+	t.Cleanup(func() { httpClient = old })
+	t.Setenv(webhookEnv, srv.URL+"/services/SECRETTOKEN")
+
+	var out, errOut bytes.Buffer
+	code := run([]string{"detect", "-file", incidentLog, "-notify", "slack"}, &out, &errOut, now)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1", code)
+	}
+	var got detectOutput
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("findings must still be printed: %v", err)
+	}
+	if len(got.Findings) != 2 || got.Notifications[0].Status != "failed" || !strings.Contains(got.Notifications[0].Error, "HTTP 403") {
+		t.Fatalf("unexpected output: %+v", got.Notifications)
+	}
+	if strings.Contains(out.String()+errOut.String(), "SECRETTOKEN") {
+		t.Fatal("webhook URL leaked into output")
+	}
+}
+
+func TestRunDetectNotifyErrors(t *testing.T) {
+	for name, tc := range map[string]struct {
+		env  string
+		args []string
+		want string
+	}{
+		"no url":            {"", []string{"-notify", "slack"}, "requires $" + webhookEnv},
+		"http url":          {"http://hooks.example.com/SECRETTOKEN", []string{"-notify", "slack"}, "must use https"},
+		"bad format":        {"", []string{"-notify", "email"}, "unknown format"},
+		"dry run alone":     {"", []string{"-notify-dry-run"}, "require -notify"},
+		"threshold alone":   {"", []string{"-notify-min-confidence", "10"}, "require -notify"},
+		"threshold too big": {"", []string{"-notify", "slack", "-notify-dry-run", "-notify-min-confidence", "101"}, "between 0 and 100"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(webhookEnv, tc.env)
+			_, code, stderr := runDetectCmd(t, append([]string{"-file", incidentLog}, tc.args...)...)
+			if code != 2 || !strings.Contains(stderr, tc.want) {
+				t.Fatalf("exit %d, stderr %q, want %q", code, stderr, tc.want)
+			}
+			if strings.Contains(stderr, "SECRETTOKEN") {
+				t.Fatal("webhook URL leaked into stderr")
 			}
 		})
 	}
