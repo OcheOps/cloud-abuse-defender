@@ -1,0 +1,9 @@
+{
+  "Metrics": [
+    {"Namespace": "AWS/Bedrock", "MetricName": "InputTokenCount", "Dimensions": [{"Name": "ModelId", "Value": "example.text-model-small"}]},
+    {"Namespace": "AWS/Bedrock", "MetricName": "OutputTokenCount", "Dimensions": [{"Name": "ModelId", "Value": "example.text-model-small"}]},
+    {"Namespace": "AWS/Bedrock", "MetricName": "InputTokenCount", "Dimensions": [{"Name": "ModelId", "Value": "example.text-model-large"}]},
+    {"Namespace": "AWS/Bedrock", "MetricName": "Invocations", "Dimensions": [{"Name": "ModelId", "Value": "example.not-a-token-metric"}]},
+    {"Namespace": "AWS/Bedrock", "MetricName": "InputTokenCount", "Dimensions": []}
+  ]
+}
