@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OcheOps/cloud-abuse-defender/internal/alert"
 	"github.com/OcheOps/cloud-abuse-defender/internal/policy"
 )
 
@@ -390,6 +391,108 @@ func TestRunDetectNotifyErrors(t *testing.T) {
 			}
 			if strings.Contains(stderr, "SECRETTOKEN") {
 				t.Fatal("webhook URL leaked into stderr")
+			}
+		})
+	}
+}
+
+// hookServer counts deliveries and fails them while fail is set.
+func hookServer(t *testing.T, fail *bool) (*int, func()) {
+	t.Helper()
+	count := 0
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if *fail {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		count++
+	}))
+	old := httpClient
+	httpClient = srv.Client()
+	t.Setenv(webhookEnv, srv.URL+"/hook")
+	return &count, func() { httpClient = old; srv.Close() }
+}
+
+func TestRunDetectDedupe(t *testing.T) {
+	fail := false
+	sent, done := hookServer(t, &fail)
+	defer done()
+	state := filepath.Join(t.TempDir(), "state.json")
+	base := []string{"-file", incidentLog, "-notify", "webhook", "-alert-state", state}
+
+	first, code, stderr := runDetectCmd(t, base...)
+	if code != 0 || *sent != 1 || first.Notifications[0].Status != "sent" || first.Notifications[0].Verdict != alert.VerdictNew {
+		t.Fatalf("first run: exit %d sent %d %+v %s", code, *sent, first.Notifications, stderr)
+	}
+
+	second, code, _ := runDetectCmd(t, base...)
+	if code != 0 || *sent != 1 || second.Notifications[0].Status != "suppressed_duplicate" {
+		t.Fatalf("second run must suppress: sent %d %+v", *sent, second.Notifications)
+	}
+
+	// A decision now exists (alert-only -> containment eligible): escalate.
+	third, code, _ := runDetectCmd(t, append(base, "-usage", exampleUsage, "-pricing", examplePricing, "-allow-containment")...)
+	if code != 0 || *sent != 2 || third.Notifications[0].Verdict != alert.VerdictEscalated {
+		t.Fatalf("decision change must escalate: sent %d %+v", *sent, third.Notifications)
+	}
+
+	// A zero suppression period turns unchanged alerts into reminders.
+	fourth, code, _ := runDetectCmd(t, append(base, "-usage", exampleUsage, "-pricing", examplePricing, "-allow-containment", "-alert-suppress-for", "0s")...)
+	if code != 0 || *sent != 3 || fourth.Notifications[0].Verdict != alert.VerdictReminder {
+		t.Fatalf("expired suppression must remind: sent %d %+v", *sent, fourth.Notifications)
+	}
+}
+
+func TestRunDetectDedupeDryRunAndFailuresDoNotRecord(t *testing.T) {
+	fail := true
+	sent, done := hookServer(t, &fail)
+	defer done()
+	state := filepath.Join(t.TempDir(), "state.json")
+	base := []string{"-file", incidentLog, "-notify", "webhook", "-alert-state", state}
+
+	if _, code, _ := runDetectCmd(t, append(base, "-notify-dry-run")...); code != 0 {
+		t.Fatalf("dry run exit %d", code)
+	}
+	if _, err := os.Stat(state); !os.IsNotExist(err) {
+		t.Fatalf("dry run must not write state: %v", err)
+	}
+
+	var out, errOut bytes.Buffer
+	if code := run(append([]string{"detect"}, base...), &out, &errOut, now); code != 1 {
+		t.Fatalf("failed send exit %d, want 1", code)
+	}
+	if _, err := os.Stat(state); !os.IsNotExist(err) {
+		t.Fatalf("failed send must not be recorded: %v", err)
+	}
+
+	fail = false
+	got, code, _ := runDetectCmd(t, base...)
+	if code != 0 || *sent != 1 || got.Notifications[0].Verdict != alert.VerdictNew {
+		t.Fatalf("alert must be retried after a failure: sent %d %+v", *sent, got.Notifications)
+	}
+}
+
+func TestRunDetectDedupeErrors(t *testing.T) {
+	dir := t.TempDir()
+	corrupt := filepath.Join(dir, "corrupt.json")
+	if err := os.WriteFile(corrupt, []byte("nope"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(webhookEnv, "")
+	for name, tc := range map[string]struct {
+		args []string
+		want string
+	}{
+		"state without notify":    {[]string{"-alert-state", corrupt}, "require -notify"},
+		"suppress without notify": {[]string{"-alert-suppress-for", "1h"}, "require -notify"},
+		"suppress without state":  {[]string{"-notify", "slack", "-notify-dry-run", "-alert-suppress-for", "1h"}, "requires -alert-state"},
+		"negative suppress":       {[]string{"-notify", "slack", "-notify-dry-run", "-alert-state", corrupt, "-alert-suppress-for", "-1h"}, "must not be negative"},
+		"corrupt state":           {[]string{"-notify", "slack", "-notify-dry-run", "-alert-state", corrupt}, "invalid alert state"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, code, stderr := runDetectCmd(t, append([]string{"-file", incidentLog}, tc.args...)...)
+			if code != 2 || !strings.Contains(stderr, tc.want) {
+				t.Fatalf("exit %d, stderr %q, want %q", code, stderr, tc.want)
 			}
 		})
 	}
