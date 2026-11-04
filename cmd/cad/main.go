@@ -3,6 +3,9 @@
 //
 // The hourly spend comes either from -hourly-rate, or from a Bedrock usage
 // observation priced with a versioned table (-usage and -pricing).
+//
+// "cad cloudtrail -file <log>" replays a CloudTrail log file offline and
+// prints normalized, redacted events with indicators.
 package main
 
 import (
@@ -13,6 +16,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/OcheOps/cloud-abuse-defender/internal/cloudtrail"
 	"github.com/OcheOps/cloud-abuse-defender/internal/cost"
 	"github.com/OcheOps/cloud-abuse-defender/internal/policy"
 )
@@ -29,6 +33,61 @@ type estimateOutput struct {
 }
 
 func run(args []string, stdout, stderr io.Writer, now time.Time) int {
+	if len(args) > 0 && args[0] == "cloudtrail" {
+		return runCloudTrail(args[1:], stdout, stderr)
+	}
+	return runPolicy(args, stdout, stderr, now)
+}
+
+type cloudTrailOutput struct {
+	Events  []cloudtrail.Event `json:"events"`
+	Summary cloudtrail.Summary `json:"summary"`
+}
+
+func runCloudTrail(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("cad cloudtrail", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	path := fs.String("file", "", "CloudTrail log file (S3 delivery format, .json or .json.gz); required")
+	onlyIndicators := fs.Bool("only-indicators", false, "print only events that carry at least one indicator (summary still counts all events)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(stderr, "unexpected arguments: %v\n", fs.Args())
+		return 2
+	}
+	if *path == "" {
+		fmt.Fprintln(stderr, "-file is required")
+		return 2
+	}
+	events, err := loadFile(*path, cloudtrail.Replay)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	out := cloudTrailOutput{Events: events, Summary: cloudtrail.Summarize(events)}
+	if *onlyIndicators {
+		out.Events = out.Events[:0:0]
+		for _, ev := range events {
+			if len(ev.Indicators) > 0 {
+				out.Events = append(out.Events, ev)
+			}
+		}
+	}
+	return encode(stdout, stderr, out)
+}
+
+func encode(stdout, stderr io.Writer, v any) int {
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(v); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	return 0
+}
+
+func runPolicy(args []string, stdout, stderr io.Writer, now time.Time) int {
 	fs := flag.NewFlagSet("cad", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	hourly := fs.Float64("hourly-rate", 25, "estimated unauthorized spend per hour in USD (ignored with -usage)")
@@ -89,13 +148,7 @@ func run(args []string, stdout, stderr io.Writer, now time.Time) int {
 	if est != nil {
 		out = estimateOutput{Estimate: *est, Decision: decision}
 	}
-	encoder := json.NewEncoder(stdout)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(out); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	return 0
+	return encode(stdout, stderr, out)
 }
 
 func estimateFromFiles(usagePath, pricingPath string, opt cost.Options) (cost.Estimate, error) {
