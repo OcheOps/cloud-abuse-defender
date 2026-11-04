@@ -720,11 +720,11 @@ func TestRunEvidenceVerifyFailures(t *testing.T) {
 
 // approvalLog runs detection with a cost source so the top finding is
 // containment eligible, and returns the log path and both incident IDs.
-func approvalLog(t *testing.T) (string, string, string) {
+func approvalLog(t *testing.T, extra ...string) (string, string, string) {
 	t.Helper()
 	logPath := filepath.Join(t.TempDir(), "evidence.jsonl")
-	got, code, stderr := runDetectCmd(t, "-file", incidentLog, "-evidence-log", logPath,
-		"-usage", exampleUsage, "-pricing", examplePricing, "-allow-containment")
+	got, code, stderr := runDetectCmd(t, append([]string{"-file", incidentLog, "-evidence-log", logPath,
+		"-usage", exampleUsage, "-pricing", examplePricing, "-allow-containment"}, extra...)...)
 	if code != 0 {
 		t.Fatalf("setup: exit %d %s", code, stderr)
 	}
@@ -745,10 +745,16 @@ func decide(t *testing.T, args ...string) (decisionOutput, int, string) {
 	return d, code, stderr
 }
 
-func TestRunApprovalWorkflow(t *testing.T) {
+// as runs the next commands as a given local OS account.
+func as(t *testing.T, account string) {
+	t.Helper()
 	old := localAccount
-	localAccount = func() string { return "test-account" }
+	localAccount = func() string { return account }
 	t.Cleanup(func() { localAccount = old })
+}
+
+func TestRunApprovalWorkflow(t *testing.T) {
+	as(t, "alice-account")
 	logPath, top, root := approvalLog(t)
 
 	out, code, stderr := runCmd(t, "approvals", "-evidence-log", logPath)
@@ -764,18 +770,30 @@ func TestRunApprovalWorkflow(t *testing.T) {
 		t.Fatalf("unexpected states: %v", states)
 	}
 
-	d, code, stderr := decide(t, "approve", "-evidence-log", logPath, "-incident", top, "-principal", ciDeploy,
-		"-action", "deactivate-access-keys", "-expires", "4h", "-operator", "alice", "-reason", "confirmed stolen key")
-	if code != 0 || d.Status.State != incident.StateApproved || d.Record.Kind != incident.KindApproval {
-		t.Fatalf("approve: exit %d %+v %s", code, d, stderr)
+	approveAs := func(operator string) (decisionOutput, int, string) {
+		return decide(t, "approve", "-evidence-log", logPath, "-incident", top, "-principal", ciDeploy,
+			"-action", "deactivate-access-keys", "-expires", "4h", "-operator", operator, "-reason", "confirmed stolen key")
 	}
-	if d.Status.Approval.RecordedBy != "test-account" || !d.Status.Approval.ExpiresAt.Equal(now.Add(4*time.Hour)) {
-		t.Fatalf("approval details: %+v", d.Status.Approval)
+	d, code, stderr := approveAs("alice")
+	if code != 0 || d.Status.State != incident.StatePartiallyApproved || d.Record.Kind != incident.KindApproval || d.Status.RequiredApprovals != 2 {
+		t.Fatalf("first approval must be partial: exit %d %+v %s", code, d, stderr)
+	}
+	if d.Status.Approvals[0].RecordedBy != "alice-account" || !d.Status.ExpiresAt.Equal(now.Add(4*time.Hour)) {
+		t.Fatalf("approval details: %+v", d.Status)
+	}
+	// A second name from the same OS account does not count.
+	if _, code, stderr := approveAs("bob"); code != 1 || !strings.Contains(stderr, "another account") {
+		t.Fatalf("same-account second approval: %d %s", code, stderr)
 	}
 
-	if _, code, stderr := decide(t, "approve", "-evidence-log", logPath, "-incident", top, "-principal", ciDeploy,
-		"-action", "deactivate-access-keys", "-expires", "4h", "-operator", "bob", "-reason", "again"); code != 1 || !strings.Contains(stderr, "already approved") {
-		t.Fatalf("double approval: %d %s", code, stderr)
+	as(t, "bob-account")
+	d, code, stderr = approveAs("bob")
+	if code != 0 || d.Status.State != incident.StateApproved || len(d.Status.Approvals) != 2 {
+		t.Fatalf("second operator must complete the quorum: %d %+v %s", code, d, stderr)
+	}
+	as(t, "carol-account")
+	if _, code, stderr := approveAs("carol"); code != 1 || !strings.Contains(stderr, "already approved") {
+		t.Fatalf("approval beyond quorum: %d %s", code, stderr)
 	}
 
 	d, code, stderr = decide(t, "revoke", "-evidence-log", logPath, "-incident", top, "-operator", "alice", "-reason", "key rotated instead")
@@ -793,7 +811,7 @@ func TestRunApprovalWorkflow(t *testing.T) {
 		t.Fatalf("single status: %d %s", code, out)
 	}
 	// Every decision is part of the verified chain.
-	if out, code, stderr := runCmd(t, "evidence-verify", "-file", logPath); code != 0 || !strings.Contains(out, `"records": 5`) {
+	if out, code, stderr := runCmd(t, "evidence-verify", "-file", logPath); code != 0 || !strings.Contains(out, `"records": 6`) {
 		t.Fatalf("verify after decisions: %d %s %s", code, out, stderr)
 	}
 }
@@ -857,5 +875,30 @@ func TestRunDecisionRefusesTamperedLog(t *testing.T) {
 	_, code, stderr := runCmd(t, "reject", "-evidence-log", logPath, "-incident", top, "-operator", "a", "-reason", "r")
 	if code != 1 || !strings.Contains(stderr, "hash mismatch") {
 		t.Fatalf("decision on tampered log: %d %s", code, stderr)
+	}
+}
+
+func TestRunApprovalsRequiredFlag(t *testing.T) {
+	as(t, "solo-account")
+	logPath, top, _ := approvalLog(t, "-approvals-required", "1")
+	d, code, stderr := decide(t, "approve", "-evidence-log", logPath, "-incident", top, "-principal", ciDeploy,
+		"-action", "attach-deny-all-policy", "-expires", "1h", "-operator", "solo", "-reason", "single-operator team")
+	if code != 0 || d.Status.State != incident.StateApproved || d.Status.RequiredApprovals != 1 {
+		t.Fatalf("quorum of one: %d %+v %s", code, d, stderr)
+	}
+	for name, tc := range map[string]struct {
+		args []string
+		want string
+	}{
+		"zero":        {[]string{"-evidence-log", filepath.Join(t.TempDir(), "e"), "-approvals-required", "0"}, "between 1 and 5"},
+		"too many":    {[]string{"-evidence-log", filepath.Join(t.TempDir(), "e"), "-approvals-required", "6"}, "between 1 and 5"},
+		"without log": {[]string{"-approvals-required", "3"}, "requires -evidence-log"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, code, stderr := runDetectCmd(t, append([]string{"-file", incidentLog}, tc.args...)...)
+			if code != 2 || !strings.Contains(stderr, tc.want) {
+				t.Fatalf("exit %d, stderr %q, want %q", code, stderr, tc.want)
+			}
+		})
 	}
 }
