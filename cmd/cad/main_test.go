@@ -199,3 +199,99 @@ func TestRunCloudTrailErrors(t *testing.T) {
 		})
 	}
 }
+
+func runDetectCmd(t *testing.T, args ...string) (detectOutput, int, string) {
+	t.Helper()
+	var out, errOut bytes.Buffer
+	code := run(append([]string{"detect"}, args...), &out, &errOut, now)
+	var got detectOutput
+	if code == 0 {
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatalf("invalid JSON %q: %v", out.String(), err)
+		}
+	} else if out.Len() != 0 {
+		t.Fatalf("unexpected stdout on failure: %s", out.String())
+	}
+	return got, code, errOut.String()
+}
+
+func TestRunDetectFindingsOnly(t *testing.T) {
+	got, code, stderr := runDetectCmd(t, "-file", incidentLog)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if len(got.Findings) != 2 || got.Findings[0].Confidence != 98.6 || got.Estimate != nil {
+		t.Fatalf("unexpected output: %+v", got)
+	}
+	for _, f := range got.Findings {
+		if f.Decision != nil {
+			t.Fatalf("no decision expected without a cost source: %+v", f)
+		}
+	}
+}
+
+func TestRunDetectWithUsagePipeline(t *testing.T) {
+	got, code, stderr := runDetectCmd(t, "-file", incidentLog, "-usage", exampleUsage, "-pricing", examplePricing, "-allow-containment")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if got.Estimate == nil || got.Estimate.HourlyCostUSD != 56 {
+		t.Fatalf("missing estimate: %+v", got.Estimate)
+	}
+	top, root := got.Findings[0], got.Findings[1]
+	if top.Decision == nil || top.Decision.Action != policy.RecommendContainment {
+		t.Fatalf("top finding should be eligible: %+v", top.Decision)
+	}
+	if root.Decision == nil || root.Decision.Reason != policy.ReasonLowConfidence {
+		t.Fatalf("root finding (36%%) must stay alert-only: %+v", root.Decision)
+	}
+}
+
+func TestRunDetectExplicitRate(t *testing.T) {
+	got, code, stderr := runDetectCmd(t, "-file", incidentLog, "-hourly-rate", "1")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	d := got.Findings[0].Decision
+	if d == nil || d.Action != policy.Alert || d.Reason != policy.ReasonBelowThreshold {
+		t.Fatalf("$24 projected must stay below threshold: %+v", d)
+	}
+}
+
+func TestRunDetectWindowSplits(t *testing.T) {
+	got, code, stderr := runDetectCmd(t, "-file", incidentLog, "-window", "30s")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if len(got.Findings) <= 2 {
+		t.Fatalf("a 30s window should split the minute-spaced incident, got %d findings", len(got.Findings))
+	}
+}
+
+func TestRunDetectErrors(t *testing.T) {
+	bad := filepath.Join(t.TempDir(), "bad.json")
+	if err := os.WriteFile(bad, []byte(`{"nope":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		args []string
+		want string
+	}{
+		"missing file flag": {nil, "-file is required"},
+		"positional args":   {[]string{"-file", incidentLog, "x"}, "unexpected arguments"},
+		"negative window":   {[]string{"-file", incidentLog, "-window", "-1s"}, "window must not be negative"},
+		"usage alone":       {[]string{"-file", incidentLog, "-usage", exampleUsage}, "must be used together"},
+		"rate and usage":    {[]string{"-file", incidentLog, "-usage", exampleUsage, "-pricing", examplePricing, "-hourly-rate", "3"}, "cannot be combined"},
+		"invalid log":       {[]string{"-file", bad}, "invalid cloudtrail input"},
+		"invalid policy":    {[]string{"-file", incidentLog, "-hourly-rate", "5", "-threshold", "0"}, "threshold_usd"},
+		"bad usage file":    {[]string{"-file", incidentLog, "-usage", "nope.json", "-pricing", examplePricing}, "nope.json"},
+		"unknown flag":      {[]string{"-confidence", "90"}, "flag provided but not defined"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, code, stderr := runDetectCmd(t, tc.args...)
+			if code != 2 || !strings.Contains(stderr, tc.want) {
+				t.Fatalf("exit %d, stderr %q, want %q", code, stderr, tc.want)
+			}
+		})
+	}
+}
