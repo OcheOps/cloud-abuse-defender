@@ -17,6 +17,7 @@ Agents/telemetry -> ingestion -> policy engine -> incident store -> response orc
 ## Required protections before live execution
 - Read-only collectors, mTLS/signatures for telemetry, RBAC, tamper-evident audit logging.
 - Minimize/redact secrets and short retention of sensitive evidence.
+- Hash-chained evidence records, with record hashes copied into alerts so a rebuilt or truncated log is detectable.
 - Treat alert webhook URLs as secrets (environment only, https only, never logged) and send third-party channels only the minimum needed to triage.
 - Require corroborating security indicators, not spending alone.
 - Human approval by default; explicit policy-scoped opt-in for any automatic action.

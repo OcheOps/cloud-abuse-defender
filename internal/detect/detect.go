@@ -15,6 +15,8 @@
 package detect
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -23,6 +25,10 @@ import (
 
 	"github.com/OcheOps/cloud-abuse-defender/internal/cloudtrail"
 )
+
+// WeightsVersion identifies the scoring weights and rules. Bump it whenever
+// any weight, rule or threshold changes; TestWeightsVersion fails otherwise.
+const WeightsVersion = "weights-2026-11-04.1"
 
 // ErrInvalid is wrapped by validation errors in this package.
 var ErrInvalid = errors.New("invalid detector input")
@@ -131,6 +137,14 @@ type Finding struct {
 	Indicators   map[cloudtrail.Indicator]int `json:"indicators"`
 	Contributors []Contributor                `json:"contributors"`
 	Confidence   float64                      `json:"confidence"`
+}
+
+// IncidentID is a stable identifier for a finding, derived from its
+// principal and first event time. A replay that starts earlier and so finds
+// an earlier first event yields a different ID.
+func (f Finding) IncidentID() string {
+	sum := sha256.Sum256([]byte(f.Principal + "|" + f.First.UTC().Format(time.RFC3339Nano)))
+	return "inc_" + hex.EncodeToString(sum[:8])
 }
 
 // principalKey identifies who acted. Masked key IDs are a weaker key than

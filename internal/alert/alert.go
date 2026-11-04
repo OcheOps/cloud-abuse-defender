@@ -65,8 +65,13 @@ type Evidence struct {
 
 // Alert is the minimal, recipient-safe view of a finding.
 type Alert struct {
-	Schema         string           `json:"schema"`
-	GeneratedAt    time.Time        `json:"generated_at"`
+	Schema      string    `json:"schema"`
+	GeneratedAt time.Time `json:"generated_at"`
+	IncidentID  string    `json:"incident_id"`
+	// EvidenceHash is the hash of the evidence-log record behind this alert,
+	// when an evidence log is kept. Keeping it outside the log lets a later
+	// rewrite of the whole log be detected.
+	EvidenceHash   string           `json:"evidence_hash,omitempty"`
 	Principal      string           `json:"principal"`
 	AccountIDs     []string         `json:"account_ids,omitempty"`
 	Regions        []string         `json:"regions,omitempty"`
@@ -88,6 +93,7 @@ func FromFinding(f detect.Finding, decision *policy.Decision, estimate *cost.Est
 	a := Alert{
 		Schema:      Schema,
 		GeneratedAt: now.UTC(),
+		IncidentID:  f.IncidentID(),
 		Principal:   f.Principal,
 		AccountIDs:  f.AccountIDs,
 		Regions:     f.Regions,
@@ -154,6 +160,18 @@ type slackPayload struct {
 	Blocks []slackBlock `json:"blocks"`
 }
 
+func contextElements(a Alert) []slackText {
+	els := []slackText{{Type: "mrkdwn", Text: Note}}
+	if a.EvidenceHash != "" {
+		h := a.EvidenceHash
+		if len(h) > 16 {
+			h = h[:16]
+		}
+		els = append(els, slackText{Type: "mrkdwn", Text: "Evidence record " + slackEscape(h)})
+	}
+	return els
+}
+
 func slackMessage(a Alert) slackPayload {
 	title := fmt.Sprintf("Cloud Abuse Defender: %.1f%% confidence finding", a.Confidence)
 	switch a.Update {
@@ -168,6 +186,7 @@ func slackMessage(a Alert) slackPayload {
 		evidence = append(evidence, fmt.Sprintf("%s (%.2f)", e.Name, e.Weight))
 	}
 	var b strings.Builder
+	fmt.Fprintf(&b, "*Incident:* `%s`\n", slackEscape(a.IncidentID))
 	fmt.Fprintf(&b, "*Principal:* `%s`\n", slackEscape(a.Principal))
 	fmt.Fprintf(&b, "*Accounts:* %s\n", slackEscape(joinOrNone(a.AccountIDs)))
 	fmt.Fprintf(&b, "*Regions:* %s\n", slackEscape(joinOrNone(a.Regions)))
@@ -188,7 +207,7 @@ func slackMessage(a Alert) slackPayload {
 		Blocks: []slackBlock{
 			{Type: "header", Text: &slackText{Type: "plain_text", Text: title}},
 			{Type: "section", Text: &slackText{Type: "mrkdwn", Text: b.String()}},
-			{Type: "context", Elements: []slackText{{Type: "mrkdwn", Text: Note}}},
+			{Type: "context", Elements: contextElements(a)},
 		},
 	}
 }

@@ -1,10 +1,13 @@
 package detect
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +36,63 @@ func contributor(f Finding, name string) (Contributor, bool) {
 		}
 	}
 	return Contributor{}, false
+}
+
+// weightsFingerprints maps each WeightsVersion to a hash of the scoring
+// configuration it names. Changing a weight without bumping WeightsVersion
+// fails here; after bumping, add the new version's fingerprint.
+var weightsFingerprints = map[string]string{
+	"weights-2026-11-04.1": "0b7867d0fa0cfb0a",
+}
+
+func scoringFingerprint() string {
+	var b strings.Builder
+	inds := make([]string, 0, len(IndicatorWeights))
+	for ind := range IndicatorWeights {
+		inds = append(inds, string(ind))
+	}
+	sort.Strings(inds)
+	for _, ind := range inds {
+		fmt.Fprintf(&b, "w %s %v\n", ind, IndicatorWeights[cloudtrail.Indicator(ind)])
+	}
+	for _, r := range ChainRules {
+		fmt.Fprintf(&b, "c %s %v %v\n", r.Name, r.Weight, r.AllOf)
+	}
+	fmt.Fprintf(&b, "k %d %d %v %v %v\n", EnumerationBurstThreshold, MultiRegionGPUThreshold, enumerationBurstWeight, multiRegionGPUWeight, DefaultWindow)
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:8])
+}
+
+func TestWeightsVersion(t *testing.T) {
+	want, ok := weightsFingerprints[WeightsVersion]
+	if !ok {
+		t.Fatalf("WeightsVersion %q has no fingerprint entry", WeightsVersion)
+	}
+	if got := scoringFingerprint(); got != want {
+		t.Fatalf("scoring configuration changed (fingerprint %s) but WeightsVersion is still %q; bump it and record the new fingerprint", got, WeightsVersion)
+	}
+}
+
+func TestIncidentID(t *testing.T) {
+	f := Finding{Principal: "arn:aws:iam::123456789012:user/a", First: t0}
+	id := f.IncidentID()
+	if len(id) != len("inc_")+16 || !strings.HasPrefix(id, "inc_") {
+		t.Fatalf("unexpected id %q", id)
+	}
+	g := f
+	g.First = t0.In(time.FixedZone("x", 3600))
+	if g.IncidentID() != id {
+		t.Fatal("incident ID must not depend on time zone")
+	}
+	g.First = t0.Add(time.Second)
+	if g.IncidentID() == id {
+		t.Fatal("different first event must give a different ID")
+	}
+	g = f
+	g.Principal = "other"
+	if g.IncidentID() == id {
+		t.Fatal("different principal must give a different ID")
+	}
 }
 
 func TestWeightsAreProbabilities(t *testing.T) {
