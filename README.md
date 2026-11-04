@@ -38,7 +38,7 @@ go test ./...
 go run ./cmd/cad -hourly-rate 25 -hours 24 -threshold 100 -confidence 90
 ```
 
-This is a **simulation**, not a live billing feed. It prints a JSON decision and never calls cloud APIs or terminates anything. Default response mode is alert-only; `-allow-containment` opts into a *recommendation* only, not execution.
+This is a **simulation**, not a live billing feed. It prints a JSON decision and never calls cloud APIs or terminates anything. Default response mode is alert-only; `-allow-containment` opts into a *recommendation* only, not execution. `-threshold` and `-min-confidence` must be greater than zero, so neither gate can be disabled by accident.
 
 ## Roadmap
 
