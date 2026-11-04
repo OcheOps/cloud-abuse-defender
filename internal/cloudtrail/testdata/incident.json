@@ -1,0 +1,280 @@
+{
+  "Records": [
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLEPRINCIPAL",
+        "arn": "arn:aws:iam::123456789012:user/ci-deploy",
+        "accountId": "123456789012",
+        "accessKeyId": "AKIAIOSFODNN7EXAMPLE",
+        "userName": "ci-deploy"
+      },
+      "eventTime": "2026-11-04T10:06:00Z",
+      "eventSource": "ec2.amazonaws.com",
+      "eventName": "RunInstances",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.50",
+      "userAgent": "Boto3/1.34.0 Python/3.11.6 Linux/6.1 Botocore/1.34.0",
+      "requestParameters": {
+        "instancesSet": {
+          "items": [
+            {
+              "imageId": "ami-0example",
+              "minCount": 1,
+              "maxCount": 1
+            }
+          ]
+        },
+        "instanceType": "t3.micro",
+        "userData": "<sensitiveDataRemoved>"
+      },
+      "responseElements": null,
+      "requestID": "req-00000000-0000-0000-0000-000000000008",
+      "eventID": "00000000-0000-0000-0000-000000000008",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLEPRINCIPAL",
+        "arn": "arn:aws:iam::123456789012:user/ci-deploy",
+        "accountId": "123456789012",
+        "accessKeyId": "AKIAIOSFODNN7EXAMPLE",
+        "userName": "ci-deploy"
+      },
+      "eventTime": "2026-11-04T10:00:00Z",
+      "eventSource": "sts.amazonaws.com",
+      "eventName": "GetCallerIdentity",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.50",
+      "userAgent": "Boto3/1.34.0 Python/3.11.6 Linux/6.1 Botocore/1.34.0",
+      "requestParameters": null,
+      "responseElements": null,
+      "requestID": "req-00000000-0000-0000-0000-000000000001",
+      "eventID": "00000000-0000-0000-0000-000000000001",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true,
+      "readOnly": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLEPRINCIPAL",
+        "arn": "arn:aws:iam::123456789012:user/ci-deploy",
+        "accountId": "123456789012",
+        "accessKeyId": "AKIAIOSFODNN7EXAMPLE",
+        "userName": "ci-deploy"
+      },
+      "eventTime": "2026-11-04T10:01:00Z",
+      "eventSource": "ec2.amazonaws.com",
+      "eventName": "DescribeInstances",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.50",
+      "userAgent": "Boto3/1.34.0 Python/3.11.6 Linux/6.1 Botocore/1.34.0",
+      "requestParameters": null,
+      "responseElements": null,
+      "requestID": "req-00000000-0000-0000-0000-000000000002",
+      "eventID": "00000000-0000-0000-0000-000000000002",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true,
+      "readOnly": true,
+      "errorCode": "Client.UnauthorizedOperation",
+      "errorMessage": "You are not authorized to perform this operation."
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLEPRINCIPAL",
+        "arn": "arn:aws:iam::123456789012:user/ci-deploy",
+        "accountId": "123456789012",
+        "accessKeyId": "AKIAIOSFODNN7EXAMPLE",
+        "userName": "ci-deploy"
+      },
+      "eventTime": "2026-11-04T10:02:00Z",
+      "eventSource": "bedrock.amazonaws.com",
+      "eventName": "ListFoundationModels",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.50",
+      "userAgent": "Boto3/1.34.0 Python/3.11.6 Linux/6.1 Botocore/1.34.0",
+      "requestParameters": null,
+      "responseElements": null,
+      "requestID": "req-00000000-0000-0000-0000-000000000003",
+      "eventID": "00000000-0000-0000-0000-000000000003",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true,
+      "readOnly": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLEPRINCIPAL",
+        "arn": "arn:aws:iam::123456789012:user/ci-deploy",
+        "accountId": "123456789012",
+        "accessKeyId": "AKIAIOSFODNN7EXAMPLE",
+        "userName": "ci-deploy"
+      },
+      "eventTime": "2026-11-04T10:03:00Z",
+      "eventSource": "bedrock.amazonaws.com",
+      "eventName": "DeleteModelInvocationLoggingConfiguration",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.50",
+      "userAgent": "Boto3/1.34.0 Python/3.11.6 Linux/6.1 Botocore/1.34.0",
+      "requestParameters": null,
+      "responseElements": null,
+      "requestID": "req-00000000-0000-0000-0000-000000000004",
+      "eventID": "00000000-0000-0000-0000-000000000004",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLEPRINCIPAL",
+        "arn": "arn:aws:iam::123456789012:user/ci-deploy",
+        "accountId": "123456789012",
+        "accessKeyId": "AKIAIOSFODNN7EXAMPLE",
+        "userName": "ci-deploy"
+      },
+      "eventTime": "2026-11-04T10:04:00Z",
+      "eventSource": "bedrock.amazonaws.com",
+      "eventName": "PutUseCaseForModelAccess",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.50",
+      "userAgent": "Boto3/1.34.0 Python/3.11.6 Linux/6.1 Botocore/1.34.0",
+      "requestParameters": null,
+      "responseElements": null,
+      "requestID": "req-00000000-0000-0000-0000-000000000005",
+      "eventID": "00000000-0000-0000-0000-000000000005",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLEPRINCIPAL",
+        "arn": "arn:aws:iam::123456789012:user/ci-deploy",
+        "accountId": "123456789012",
+        "accessKeyId": "AKIAIOSFODNN7EXAMPLE",
+        "userName": "ci-deploy"
+      },
+      "eventTime": "2026-11-04T10:05:00Z",
+      "eventSource": "servicequotas.amazonaws.com",
+      "eventName": "RequestServiceQuotaIncrease",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.50",
+      "userAgent": "Boto3/1.34.0 Python/3.11.6 Linux/6.1 Botocore/1.34.0",
+      "requestParameters": {
+        "serviceCode": "ec2",
+        "quotaCode": "L-417A185B",
+        "desiredValue": 768.0
+      },
+      "responseElements": null,
+      "requestID": "req-00000000-0000-0000-0000-000000000006",
+      "eventID": "00000000-0000-0000-0000-000000000006",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLEPRINCIPAL",
+        "arn": "arn:aws:iam::123456789012:user/ci-deploy",
+        "accountId": "123456789012",
+        "accessKeyId": "AKIAIOSFODNN7EXAMPLE",
+        "userName": "ci-deploy"
+      },
+      "eventTime": "2026-11-04T10:06:00Z",
+      "eventSource": "ec2.amazonaws.com",
+      "eventName": "RunInstances",
+      "awsRegion": "us-west-2",
+      "sourceIPAddress": "203.0.113.50",
+      "userAgent": "Boto3/1.34.0 Python/3.11.6 Linux/6.1 Botocore/1.34.0",
+      "requestParameters": {
+        "instancesSet": {
+          "items": [
+            {
+              "imageId": "ami-0example",
+              "minCount": 20,
+              "maxCount": 20
+            }
+          ]
+        },
+        "instanceType": "p4d.24xlarge",
+        "userData": "<sensitiveDataRemoved>"
+      },
+      "responseElements": null,
+      "requestID": "req-00000000-0000-0000-0000-000000000007",
+      "eventID": "00000000-0000-0000-0000-000000000007",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLEPRINCIPAL",
+        "arn": "arn:aws:iam::123456789012:user/ci-deploy",
+        "accountId": "123456789012",
+        "accessKeyId": "AKIAIOSFODNN7EXAMPLE",
+        "userName": "ci-deploy"
+      },
+      "eventTime": "2026-11-04T10:07:00Z",
+      "eventSource": "cloudtrail.amazonaws.com",
+      "eventName": "StopLogging",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.50",
+      "userAgent": "Boto3/1.34.0 Python/3.11.6 Linux/6.1 Botocore/1.34.0",
+      "requestParameters": {
+        "name": "arn:aws:cloudtrail:us-east-1:123456789012:trail/org-trail"
+      },
+      "responseElements": null,
+      "requestID": "req-00000000-0000-0000-0000-000000000009",
+      "eventID": "00000000-0000-0000-0000-000000000009",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "Root",
+        "principalId": "123456789012",
+        "arn": "arn:aws:iam::123456789012:root",
+        "accountId": "123456789012",
+        "accessKeyId": "ASIAEXAMPLEROOTSESSN"
+      },
+      "eventTime": "2026-11-04T10:08:00Z",
+      "eventSource": "iam.amazonaws.com",
+      "eventName": "CreateAccessKey",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "198.51.100.7",
+      "userAgent": "Boto3/1.34.0 Python/3.11.6 Linux/6.1 Botocore/1.34.0",
+      "requestParameters": {
+        "userName": "backup-svc"
+      },
+      "responseElements": null,
+      "requestID": "req-00000000-0000-0000-0000-000000000010",
+      "eventID": "00000000-0000-0000-0000-000000000010",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    }
+  ]
+}
