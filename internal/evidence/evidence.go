@@ -177,6 +177,16 @@ func VerifyFileContains(path, hash string) (Head, bool, error) {
 	return head, found, err
 }
 
+// ReadFile verifies the log and returns all of its records in order.
+func ReadFile(path string) ([]Record, Head, error) {
+	var recs []Record
+	head, err := verifyFile(path, func(r Record) { recs = append(recs, r) })
+	if err != nil {
+		return nil, head, err
+	}
+	return recs, head, nil
+}
+
 func verifyFile(path string, each func(Record)) (Head, error) {
 	f, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {

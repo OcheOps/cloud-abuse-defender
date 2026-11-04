@@ -27,7 +27,7 @@ Initial components:
 2. **Detector (implemented)**: correlates CloudTrail indicators per principal into scored, explainable findings. Anomaly baselines and host cryptominer indicators are planned.
 3. **Policy engine (implemented)**: pure Go spending projection + risk gate.
    **Bedrock cost estimator (implemented)**: prices observed token usage with a versioned pricing table and flags unreliable forecasts.
-4. Response orchestration: **Slack/webhook alerts (implemented)**; approval workflows and reversible scoped containment planned.
+4. Response orchestration: **Slack/webhook alerts and the operator approval workflow (implemented)**; executing reversible scoped containment is planned and disabled by design.
 5. **Evidence store (implemented)**: tamper-evident, hash-chained incident records with the policy and weight versions behind each decision.
 
 ## Try the policy engine
@@ -217,6 +217,35 @@ go run ./cmd/cad evidence-verify -file cad-evidence.jsonl -expect-record <eviden
 ```
 
 The log contains principal ARNs, source IPs and event IDs, is written `0600`, and assumes one writer at a time.
+
+### Approve or reject containment
+
+Approvals are **recorded decisions, not actions**: nothing in this project executes containment. They live in the evidence log, so every decision is part of the verified chain.
+
+```sh
+# Run detection with a cost source and -allow-containment so eligible findings are marked
+go run ./cmd/cad detect -file trail.json.gz -usage usage.json -pricing pricing.json -allow-containment -evidence-log cad-evidence.jsonl
+
+go run ./cmd/cad approvals -evidence-log cad-evidence.jsonl
+go run ./cmd/cad approve -evidence-log cad-evidence.jsonl -incident inc_... \
+  -principal arn:aws:iam::123456789012:user/ci-deploy -action deactivate-access-keys \
+  -expires 4h -operator alice -reason "confirmed stolen key, owner unreachable"
+go run ./cmd/cad revoke -evidence-log cad-evidence.jsonl -incident inc_... -operator alice -reason "key rotated by owner"
+go run ./cmd/cad reject -evidence-log cad-evidence.jsonl -incident inc_... -operator alice -reason "scheduled load test"
+```
+
+Rules enforced:
+- Only a finding the policy marked **containment eligible** can be approved or rejected; approval is never inferred from a score.
+- `-principal` must repeat the incident's principal exactly, so a mistyped incident ID can't approve the wrong target.
+- Only reversible actions scoped to that principal are offered: `deactivate-access-keys` and `attach-deny-all-policy`.
+- Every decision needs an operator name and a reason, and approvals expire after `-expires`, at most 24h.
+- Decisions bind to one finding record. If a later run records a newer finding for the incident, it returns to `pending` for a fresh decision.
+- An active approval can't be approved again or rejected; revoke it first.
+- Decisions are refused on a log that fails verification, or one that changed while the decision was being checked.
+
+`cad approvals` reports each incident as `not_eligible`, `pending`, `approved`, `rejected`, `expired` or `revoked`.
+
+Identity is **not authenticated**: `operator` is what was typed, and `recorded_by` is the local OS account that ran the command. Treat approvals as an audit trail of claims until an authenticated approval path exists. There's no two-person rule yet.
 
 ## Roadmap
 
