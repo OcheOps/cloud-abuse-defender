@@ -245,6 +245,7 @@ func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
 	statePath := fs.String("alert-state", "", "state file of delivered alerts; enables de-duplication (created if missing, never written on dry runs)")
 	suppressFor := fs.Duration("alert-suppress-for", 24*time.Hour, "with -alert-state, re-send an unchanged alert only after this long")
 	evidencePath := fs.String("evidence-log", "", "append a tamper-evident record of each finding and delivered alert to this file")
+	approvalsRequired := fs.Int("approvals-required", incident.DefaultRequiredApprovals, "distinct operators who must approve containment for findings recorded in this run (1-5)")
 	cf := registerCostFlags(fs)
 	set, ok := parseFlags(fs, args, stderr)
 	if !ok {
@@ -264,6 +265,12 @@ func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
 		return 2
 	case *suppressFor < 0:
 		fmt.Fprintln(stderr, "-alert-suppress-for must not be negative")
+		return 2
+	case set["approvals-required"] && *evidencePath == "":
+		fmt.Fprintln(stderr, "-approvals-required requires -evidence-log")
+		return 2
+	case *approvalsRequired < 1 || *approvalsRequired > incident.MaxRequiredApprovals:
+		fmt.Fprintf(stderr, "-approvals-required must be between 1 and %d\n", incident.MaxRequiredApprovals)
 		return 2
 	case *notify != "":
 		format, err := alert.ParseFormat(*notify)
@@ -335,7 +342,7 @@ func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
 		}
 		defer evLog.Close()
 		for i, df := range out.Findings {
-			ev := incident.FindingData{Finding: df.Finding, Decision: df.Decision, PolicyVersion: policy.Version, WeightsVersion: detect.WeightsVersion}
+			ev := incident.FindingData{Finding: df.Finding, Decision: df.Decision, PolicyVersion: policy.Version, WeightsVersion: detect.WeightsVersion, ApprovalsRequired: *approvalsRequired}
 			if est != nil {
 				ev.PricingVersion, ev.HourlyCostUSD, ev.ForecastWarnings = est.PricingVersion, est.HourlyCostUSD, est.Warnings
 			}
