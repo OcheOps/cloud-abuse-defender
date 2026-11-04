@@ -27,7 +27,7 @@ Initial components:
 2. **Detector (implemented)**: correlates CloudTrail indicators per principal into scored, explainable findings. Anomaly baselines and host cryptominer indicators are planned.
 3. **Policy engine (implemented)**: pure Go spending projection + risk gate.
    **Bedrock cost estimator (implemented)**: prices observed token usage with a versioned pricing table and flags unreliable forecasts.
-4. Response orchestration (planned): notifications, approval workflows, reversible scoped containment.
+4. Response orchestration: **Slack/webhook alerts (implemented)**; approval workflows and reversible scoped containment planned.
 5. Evidence store (planned): immutable incident records with sensitive fields redacted.
 
 ## Try the policy engine
@@ -97,6 +97,29 @@ Every contributor is listed with its weight and the event IDs behind it. With a 
 
 The weights are starting estimates, not tuned on real incidents: review them against your own environment before relying on the scores.
 
+### Send alerts
+
+Preview the payloads without sending anything:
+
+```sh
+go run ./cmd/cad detect -file internal/cloudtrail/testdata/incident.json -notify slack -notify-dry-run
+```
+
+To deliver, put the webhook URL in `CAD_WEBHOOK_URL` and choose a format:
+
+```sh
+CAD_WEBHOOK_URL='https://hooks.slack.com/services/...' go run ./cmd/cad detect -file trail.json.gz -notify slack
+```
+
+- `-notify slack` posts a Slack incoming-webhook message; `-notify webhook` posts the generic JSON schema `cad.alert.v1`.
+- Only findings at or above `-notify-min-confidence` (default 50) are sent; the rest are listed as `skipped_below_threshold`.
+- The URL is read **only** from the environment, because flags end up in shell history and process lists. It must be `https`, and it is never printed, including in error messages.
+- Alerts include the principal, accounts, regions, time range, confidence, evidence names and weights, and the policy decision. Source IPs, user agents, access key IDs and event IDs stay out of third-party chat tools.
+- 429 and 5xx responses are retried up to 3 times with backoff; other errors fail immediately.
+- If any delivery fails, findings are still printed, each notification's status is in the output, and the command exits 1.
+
+Alerts are informational: every message says no action has been taken and containment needs operator approval. There is no de-duplication yet, so replaying the same log sends the same alerts again.
+
 ## Roadmap
 
 - [x] Initial Go module and tested policy evaluator
@@ -104,7 +127,7 @@ The weights are starting estimates, not tuned on real incidents: review them aga
 - [x] AWS Bedrock token-cost estimation and pricing-version tracking (offline; CloudWatch metrics ingestion still planned)
 - [x] CloudTrail adapter with event replay tests (offline log files; S3/EventBridge ingestion still planned)
 - [x] Indicator correlation and confidence scoring (CloudTrail)
-- [ ] Slack/webhook alert integration
+- [x] Slack/webhook alert integration (no de-duplication yet)
 - [ ] Host runtime cryptojacking indicators
 - [ ] Kubernetes integration
 - [ ] Auditable approval and containment orchestration
