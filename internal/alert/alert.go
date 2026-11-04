@@ -77,7 +77,10 @@ type Alert struct {
 	Decision       *policy.Decision `json:"decision,omitempty"`
 	PricingVersion string           `json:"pricing_version,omitempty"`
 	HourlyCostUSD  float64          `json:"hourly_cost_usd,omitempty"`
-	Note           string           `json:"note"`
+	// Update is "escalated" or "reminder" when an earlier alert for the same
+	// incident was already delivered, and empty for a first alert.
+	Update string `json:"update,omitempty"`
+	Note   string `json:"note"`
 }
 
 // FromFinding builds an alert. decision and estimate may be nil.
@@ -153,6 +156,12 @@ type slackPayload struct {
 
 func slackMessage(a Alert) slackPayload {
 	title := fmt.Sprintf("Cloud Abuse Defender: %.1f%% confidence finding", a.Confidence)
+	switch a.Update {
+	case string(VerdictEscalated):
+		title = "Escalated: " + title
+	case string(VerdictReminder):
+		title = "Reminder: " + title
+	}
 
 	evidence := make([]string, 0, len(a.Evidence))
 	for _, e := range a.Evidence {
