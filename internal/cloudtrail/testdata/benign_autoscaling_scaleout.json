@@ -1,0 +1,70 @@
+{
+  "Records": [
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "AssumedRole",
+        "principalId": "AROAEXAMPLE:AWSServiceRoleForAutoScaling/AutoScaling",
+        "arn": "arn:aws:sts::123456789012:assumed-role/AWSServiceRoleForAutoScaling/AutoScaling",
+        "accountId": "123456789012",
+        "invokedBy": "autoscaling.amazonaws.com"
+      },
+      "eventTime": "2026-11-08T18:00:00Z",
+      "eventSource": "ec2.amazonaws.com",
+      "eventName": "RunInstances",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "autoscaling.amazonaws.com",
+      "userAgent": "autoscaling.amazonaws.com",
+      "requestParameters": {
+        "instancesSet": {
+          "items": [
+            {
+              "imageId": "ami-0example",
+              "minCount": 12,
+              "maxCount": 12
+            }
+          ]
+        },
+        "instanceType": "c6i.xlarge"
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000001",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "AssumedRole",
+        "principalId": "AROAEXAMPLE:AWSServiceRoleForAutoScaling/AutoScaling",
+        "arn": "arn:aws:sts::123456789012:assumed-role/AWSServiceRoleForAutoScaling/AutoScaling",
+        "accountId": "123456789012",
+        "invokedBy": "autoscaling.amazonaws.com"
+      },
+      "eventTime": "2026-11-08T18:10:00Z",
+      "eventSource": "ec2.amazonaws.com",
+      "eventName": "RunInstances",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "autoscaling.amazonaws.com",
+      "userAgent": "autoscaling.amazonaws.com",
+      "requestParameters": {
+        "instancesSet": {
+          "items": [
+            {
+              "imageId": "ami-0example",
+              "minCount": 12,
+              "maxCount": 12
+            }
+          ]
+        },
+        "instanceType": "c6i.xlarge"
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000002",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    }
+  ]
+}

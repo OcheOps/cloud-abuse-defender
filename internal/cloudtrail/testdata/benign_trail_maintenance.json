@@ -1,0 +1,100 @@
+{
+  "Records": [
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLESECURITY",
+        "arn": "arn:aws:iam::123456789012:user/security-engineer",
+        "accountId": "123456789012",
+        "userName": "security-engineer",
+        "accessKeyId": "AKIAEXAMPLESECENGNR1"
+      },
+      "eventTime": "2026-11-07T11:00:00Z",
+      "eventSource": "cloudtrail.amazonaws.com",
+      "eventName": "DescribeTrails",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "192.0.2.10",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": null,
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000001",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLESECURITY",
+        "arn": "arn:aws:iam::123456789012:user/security-engineer",
+        "accountId": "123456789012",
+        "userName": "security-engineer",
+        "accessKeyId": "AKIAEXAMPLESECENGNR1"
+      },
+      "eventTime": "2026-11-07T11:02:00Z",
+      "eventSource": "cloudtrail.amazonaws.com",
+      "eventName": "PutEventSelectors",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "192.0.2.10",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": {
+        "trailName": "org-trail"
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000002",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLESECURITY",
+        "arn": "arn:aws:iam::123456789012:user/security-engineer",
+        "accountId": "123456789012",
+        "userName": "security-engineer",
+        "accessKeyId": "AKIAEXAMPLESECENGNR1"
+      },
+      "eventTime": "2026-11-07T11:03:00Z",
+      "eventSource": "cloudtrail.amazonaws.com",
+      "eventName": "UpdateTrail",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "192.0.2.10",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": {
+        "name": "org-trail"
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000003",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLESECURITY",
+        "arn": "arn:aws:iam::123456789012:user/security-engineer",
+        "accountId": "123456789012",
+        "userName": "security-engineer",
+        "accessKeyId": "AKIAEXAMPLESECENGNR1"
+      },
+      "eventTime": "2026-11-07T11:04:00Z",
+      "eventSource": "cloudtrail.amazonaws.com",
+      "eventName": "GetTrailStatus",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "192.0.2.10",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": null,
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000004",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    }
+  ]
+}

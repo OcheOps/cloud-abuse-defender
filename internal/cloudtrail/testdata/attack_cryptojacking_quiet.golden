@@ -1,0 +1,88 @@
+{
+  "events": [
+    {
+      "time": "2026-11-11T01:00:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000001",
+      "service": "servicequotas",
+      "action": "RequestServiceQuotaIncrease",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/legacy-backup",
+      "access_key_id": "AKIA************YBK1",
+      "source_ip": "203.0.113.91",
+      "user_agent": "aws-cli/2.15.0",
+      "indicators": [
+        "quota_increase_request"
+      ]
+    },
+    {
+      "time": "2026-11-11T01:20:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000002",
+      "service": "ec2",
+      "action": "RunInstances",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/legacy-backup",
+      "access_key_id": "AKIA************YBK1",
+      "source_ip": "203.0.113.91",
+      "user_agent": "aws-cli/2.15.0",
+      "instance_type": "g4dn.12xlarge",
+      "instance_count": 10,
+      "indicators": [
+        "gpu_instance_launch",
+        "bulk_instance_launch"
+      ]
+    },
+    {
+      "time": "2026-11-11T01:21:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000003",
+      "service": "ec2",
+      "action": "RunInstances",
+      "region": "us-west-2",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/legacy-backup",
+      "access_key_id": "AKIA************YBK1",
+      "source_ip": "203.0.113.91",
+      "user_agent": "aws-cli/2.15.0",
+      "instance_type": "g4dn.12xlarge",
+      "instance_count": 10,
+      "indicators": [
+        "gpu_instance_launch",
+        "bulk_instance_launch"
+      ]
+    },
+    {
+      "time": "2026-11-11T01:22:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000004",
+      "service": "ec2",
+      "action": "RunInstances",
+      "region": "eu-west-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/legacy-backup",
+      "access_key_id": "AKIA************YBK1",
+      "source_ip": "203.0.113.91",
+      "user_agent": "aws-cli/2.15.0",
+      "instance_type": "g5.12xlarge",
+      "instance_count": 10,
+      "indicators": [
+        "gpu_instance_launch",
+        "bulk_instance_launch"
+      ]
+    }
+  ],
+  "summary": {
+    "events": 4,
+    "events_with_indicators": 4,
+    "first_event_time": "2026-11-11T01:00:00Z",
+    "last_event_time": "2026-11-11T01:22:00Z",
+    "by_indicator": {
+      "bulk_instance_launch": 3,
+      "gpu_instance_launch": 3,
+      "quota_increase_request": 1
+    }
+  }
+}
