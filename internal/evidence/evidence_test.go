@@ -212,3 +212,17 @@ func TestVerifyFileContains(t *testing.T) {
 		t.Fatalf("truncated record must be reported missing: %v %v", found, err)
 	}
 }
+
+func TestReadFile(t *testing.T) {
+	path, recs := writeLog(t, 3)
+	got, head, err := ReadFile(path)
+	if err != nil || len(got) != 3 || head.Hash != recs[2].Hash || got[1].Hash != recs[1].Hash {
+		t.Fatalf("ReadFile: %d records, head %+v, %v", len(got), head, err)
+	}
+	ls := lines(t, path)
+	ls[0] = strings.Replace(ls[0], `"n":0`, `"n":7`, 1)
+	rewrite(t, path, ls)
+	if got, _, err := ReadFile(path); !errors.Is(err, ErrInvalid) || got != nil {
+		t.Fatalf("broken log must return no records: %v %v", got, err)
+	}
+}
