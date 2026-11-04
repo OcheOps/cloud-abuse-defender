@@ -26,6 +26,10 @@ type Input struct {
 	ThreatConfidence float64 `json:"threat_confidence"`
 	MinConfidence    float64 `json:"min_confidence"`
 	AllowContainment bool    `json:"allow_containment"`
+	// ForecastWarnings lists reasons the cost forecast may be wrong (stale
+	// pricing, unpriced models, short observation window). Any entry forces
+	// alert-only, because an unreliable forecast must not justify containment.
+	ForecastWarnings []string `json:"forecast_warnings,omitempty"`
 }
 
 // Decision is the result of evaluating an Input.
@@ -35,6 +39,8 @@ type Decision struct {
 	Reason           string  `json:"reason"`
 	// EligibleForContainment indicates policy eligibility only; there is no executor in the MVP.
 	EligibleForContainment bool `json:"eligible_for_containment"`
+	// ForecastWarnings echoes the input warnings so the decision is self-explanatory.
+	ForecastWarnings []string `json:"forecast_warnings,omitempty"`
 }
 
 // ErrInvalidInput is wrapped by every validation error returned by Evaluate.
@@ -43,6 +49,7 @@ var ErrInvalidInput = errors.New("invalid policy input")
 // Reasons reported in Decision.Reason.
 const (
 	ReasonLowConfidence       = "threat confidence below policy minimum"
+	ReasonDegradedForecast    = "cost forecast is unreliable; alert-only until forecast warnings are resolved"
 	ReasonBelowThreshold      = "projected cost below policy threshold"
 	ReasonContainmentDisabled = "containment disabled; alert-only mode"
 	ReasonEligible            = "confidence and projected cost meet or exceed policy limits; operator-approved containment required"
@@ -83,10 +90,12 @@ func Evaluate(in Input) (Decision, error) {
 	if !finite(projected) {
 		return Decision{}, fmt.Errorf("%w: projected cost overflow", ErrInvalidInput)
 	}
-	decision := Decision{Action: Alert, ProjectedCostUSD: projected}
+	decision := Decision{Action: Alert, ProjectedCostUSD: projected, ForecastWarnings: in.ForecastWarnings}
 	switch {
 	case in.ThreatConfidence < in.MinConfidence:
 		decision.Reason = ReasonLowConfidence
+	case len(in.ForecastWarnings) > 0:
+		decision.Reason = ReasonDegradedForecast
 	case projected < in.ThresholdUSD:
 		decision.Reason = ReasonBelowThreshold
 	case !in.AllowContainment:
