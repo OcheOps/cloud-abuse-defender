@@ -23,7 +23,7 @@ Stolen cloud credentials and cryptojacking can turn a security incident into a h
 See [architecture](docs/architecture.md) and [threat model](docs/threat-model.md).
 
 Initial components:
-1. Telemetry adapters (planned): AWS CloudTrail and Bedrock metrics, host agent, Kubernetes events.
+1. Telemetry adapters: **AWS CloudTrail log replay (implemented, offline)**; Bedrock metrics ingestion, host agent and Kubernetes events planned.
 2. Normalizer and detector (planned): event aggregation, anomaly detection, cryptominer indicators.
 3. **Policy engine (implemented)**: pure Go spending projection + risk gate.
    **Bedrock cost estimator (implemented)**: prices observed token usage with a versioned pricing table and flags unreliable forecasts.
@@ -58,12 +58,34 @@ The forecast is flagged as unreliable, and the decision drops to **alert-only**,
 
 Usage in one region can't be priced with another region's table. Only on-demand token pricing is modelled; provisioned throughput, batch discounts and private pricing are not.
 
+### Replay a CloudTrail log
+
+```sh
+go run ./cmd/cad cloudtrail -file internal/cloudtrail/testdata/incident.json -only-indicators
+```
+
+This reads a CloudTrail log file in the S3 delivery format (`{"Records": [...]}`, `.json` or `.json.gz`) **offline**. It makes no AWS calls. Each record becomes a minimal event: raw request and response payloads are dropped and access key IDs are masked (`AKIA************MPLE`). Events are tagged with explainable indicators:
+
+| Indicator | Trigger |
+|---|---|
+| `gpu_instance_launch` | `ec2:RunInstances` for an accelerated family (`p`, `g`, `inf`, `trn`, `dl`) |
+| `bulk_instance_launch` | one `RunInstances` call requesting 10 or more instances |
+| `quota_increase_request` | `servicequotas:RequestServiceQuotaIncrease` |
+| `monitoring_tampering` | CloudTrail `StopLogging`/`DeleteTrail`/`UpdateTrail`/`PutEventSelectors`, GuardDuty `DeleteDetector`/`UpdateDetector` |
+| `bedrock_logging_disabled` | `bedrock:DeleteModelInvocationLoggingConfiguration` |
+| `bedrock_model_access_change` | Bedrock model-access requests (`PutUseCaseForModelAccess`, `CreateFoundationModelAgreement`, `PutFoundationModelEntitlement`) |
+| `credential_creation` | IAM `CreateUser`, `CreateAccessKey`, `CreateLoginProfile`, `UpdateLoginProfile` |
+| `access_denied` | `AccessDenied`, `AccessDeniedException` or `UnauthorizedOperation` errors |
+| `root_activity` | calls made directly by the root user |
+
+Indicators are signals for a future detector to weigh, not verdicts: each one alone is often legitimate. Replay fixtures live in `internal/cloudtrail/testdata/`. Each `*.json` log has a `.golden` file holding the expected output; after an intended change, regenerate them with `go test ./internal/cloudtrail -update`.
+
 ## Roadmap
 
 - [x] Initial Go module and tested policy evaluator
 - [x] Safe CLI simulation
 - [x] AWS Bedrock token-cost estimation and pricing-version tracking (offline; CloudWatch metrics ingestion still planned)
-- [ ] CloudTrail adapter with event replay tests
+- [x] CloudTrail adapter with event replay tests (offline log files; S3/EventBridge ingestion still planned)
 - [ ] Slack/webhook alert integration
 - [ ] Host runtime cryptojacking indicators
 - [ ] Kubernetes integration
