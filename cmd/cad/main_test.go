@@ -133,3 +133,69 @@ func TestRunUsageUnpricedModelDegrades(t *testing.T) {
 		t.Fatalf("unpriced usage must degrade to alert-only: %+v", got.Decision)
 	}
 }
+
+const incidentLog = "../../internal/cloudtrail/testdata/incident.json"
+
+func runCT(t *testing.T, args ...string) (cloudTrailOutput, int, string) {
+	t.Helper()
+	var out, errOut bytes.Buffer
+	code := run(append([]string{"cloudtrail"}, args...), &out, &errOut, now)
+	var got cloudTrailOutput
+	if code == 0 {
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatalf("invalid JSON %q: %v", out.String(), err)
+		}
+	} else if out.Len() != 0 {
+		t.Fatalf("unexpected stdout on failure: %s", out.String())
+	}
+	return got, code, errOut.String()
+}
+
+func TestRunCloudTrail(t *testing.T) {
+	got, code, stderr := runCT(t, "-file", incidentLog)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if len(got.Events) != 10 || got.Summary.Events != 10 || got.Summary.WithIndicators != 7 {
+		t.Fatalf("unexpected output: %d events, summary %+v", len(got.Events), got.Summary)
+	}
+}
+
+func TestRunCloudTrailOnlyIndicators(t *testing.T) {
+	got, code, stderr := runCT(t, "-file", incidentLog, "-only-indicators")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if len(got.Events) != 7 || got.Summary.Events != 10 {
+		t.Fatalf("got %d events, summary %+v", len(got.Events), got.Summary)
+	}
+	for _, ev := range got.Events {
+		if len(ev.Indicators) == 0 {
+			t.Fatalf("event without indicators printed: %+v", ev)
+		}
+	}
+}
+
+func TestRunCloudTrailErrors(t *testing.T) {
+	bad := filepath.Join(t.TempDir(), "bad.json")
+	if err := os.WriteFile(bad, []byte(`{"nope":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		args []string
+		want string
+	}{
+		"missing file flag": {nil, "-file is required"},
+		"unknown flag":      {[]string{"-nope"}, "flag provided but not defined"},
+		"positional args":   {[]string{"-file", incidentLog, "extra"}, "unexpected arguments"},
+		"missing file":      {[]string{"-file", "nope.json"}, "nope.json"},
+		"invalid log":       {[]string{"-file", bad}, "invalid cloudtrail input"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, code, stderr := runCT(t, tc.args...)
+			if code != 2 || !strings.Contains(stderr, tc.want) {
+				t.Fatalf("exit %d, stderr %q, want %q", code, stderr, tc.want)
+			}
+		})
+	}
+}

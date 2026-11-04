@@ -1,0 +1,179 @@
+{
+  "events": [
+    {
+      "time": "2026-11-04T10:00:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000001",
+      "service": "sts",
+      "action": "GetCallerIdentity",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/ci-deploy",
+      "access_key_id": "AKIA************MPLE",
+      "source_ip": "203.0.113.50",
+      "user_agent": "Boto3/1.34.0 Python/3.11.6 Linux/6.1 Botocore/1.34.0"
+    },
+    {
+      "time": "2026-11-04T10:01:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000002",
+      "service": "ec2",
+      "action": "DescribeInstances",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/ci-deploy",
+      "access_key_id": "AKIA************MPLE",
+      "source_ip": "203.0.113.50",
+      "user_agent": "Boto3/1.34.0 Python/3.11.6 Linux/6.1 Botocore/1.34.0",
+      "error_code": "Client.UnauthorizedOperation",
+      "indicators": [
+        "access_denied"
+      ]
+    },
+    {
+      "time": "2026-11-04T10:02:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000003",
+      "service": "bedrock",
+      "action": "ListFoundationModels",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/ci-deploy",
+      "access_key_id": "AKIA************MPLE",
+      "source_ip": "203.0.113.50",
+      "user_agent": "Boto3/1.34.0 Python/3.11.6 Linux/6.1 Botocore/1.34.0"
+    },
+    {
+      "time": "2026-11-04T10:03:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000004",
+      "service": "bedrock",
+      "action": "DeleteModelInvocationLoggingConfiguration",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/ci-deploy",
+      "access_key_id": "AKIA************MPLE",
+      "source_ip": "203.0.113.50",
+      "user_agent": "Boto3/1.34.0 Python/3.11.6 Linux/6.1 Botocore/1.34.0",
+      "indicators": [
+        "bedrock_logging_disabled"
+      ]
+    },
+    {
+      "time": "2026-11-04T10:04:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000005",
+      "service": "bedrock",
+      "action": "PutUseCaseForModelAccess",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/ci-deploy",
+      "access_key_id": "AKIA************MPLE",
+      "source_ip": "203.0.113.50",
+      "user_agent": "Boto3/1.34.0 Python/3.11.6 Linux/6.1 Botocore/1.34.0",
+      "indicators": [
+        "bedrock_model_access_change"
+      ]
+    },
+    {
+      "time": "2026-11-04T10:05:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000006",
+      "service": "servicequotas",
+      "action": "RequestServiceQuotaIncrease",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/ci-deploy",
+      "access_key_id": "AKIA************MPLE",
+      "source_ip": "203.0.113.50",
+      "user_agent": "Boto3/1.34.0 Python/3.11.6 Linux/6.1 Botocore/1.34.0",
+      "indicators": [
+        "quota_increase_request"
+      ]
+    },
+    {
+      "time": "2026-11-04T10:06:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000007",
+      "service": "ec2",
+      "action": "RunInstances",
+      "region": "us-west-2",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/ci-deploy",
+      "access_key_id": "AKIA************MPLE",
+      "source_ip": "203.0.113.50",
+      "user_agent": "Boto3/1.34.0 Python/3.11.6 Linux/6.1 Botocore/1.34.0",
+      "instance_type": "p4d.24xlarge",
+      "instance_count": 20,
+      "indicators": [
+        "gpu_instance_launch",
+        "bulk_instance_launch"
+      ]
+    },
+    {
+      "time": "2026-11-04T10:06:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000008",
+      "service": "ec2",
+      "action": "RunInstances",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/ci-deploy",
+      "access_key_id": "AKIA************MPLE",
+      "source_ip": "203.0.113.50",
+      "user_agent": "Boto3/1.34.0 Python/3.11.6 Linux/6.1 Botocore/1.34.0",
+      "instance_type": "t3.micro",
+      "instance_count": 1
+    },
+    {
+      "time": "2026-11-04T10:07:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000009",
+      "service": "cloudtrail",
+      "action": "StopLogging",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/ci-deploy",
+      "access_key_id": "AKIA************MPLE",
+      "source_ip": "203.0.113.50",
+      "user_agent": "Boto3/1.34.0 Python/3.11.6 Linux/6.1 Botocore/1.34.0",
+      "indicators": [
+        "monitoring_tampering"
+      ]
+    },
+    {
+      "time": "2026-11-04T10:08:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000010",
+      "service": "iam",
+      "action": "CreateAccessKey",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "Root",
+      "principal_arn": "arn:aws:iam::123456789012:root",
+      "access_key_id": "ASIA************ESSN",
+      "source_ip": "198.51.100.7",
+      "user_agent": "Boto3/1.34.0 Python/3.11.6 Linux/6.1 Botocore/1.34.0",
+      "indicators": [
+        "credential_creation",
+        "root_activity"
+      ]
+    }
+  ],
+  "summary": {
+    "events": 10,
+    "events_with_indicators": 7,
+    "first_event_time": "2026-11-04T10:00:00Z",
+    "last_event_time": "2026-11-04T10:08:00Z",
+    "by_indicator": {
+      "access_denied": 1,
+      "bedrock_logging_disabled": 1,
+      "bedrock_model_access_change": 1,
+      "bulk_instance_launch": 1,
+      "credential_creation": 1,
+      "gpu_instance_launch": 1,
+      "monitoring_tampering": 1,
+      "quota_increase_request": 1,
+      "root_activity": 1
+    }
+  }
+}
