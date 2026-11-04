@@ -2,8 +2,10 @@ package detect
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,8 +46,10 @@ func TestWeightsAreProbabilities(t *testing.T) {
 			t.Errorf("chain rule %s: weight %v, %d groups", r.Name, r.Weight, len(r.AllOf))
 		}
 	}
-	if !(enumerationBurstWeight > 0 && enumerationBurstWeight < 1) {
-		t.Error("enumeration burst weight out of range")
+	for name, w := range map[string]float64{"enumeration_burst": enumerationBurstWeight, "multi_region_gpu_launch": multiRegionGPUWeight} {
+		if !(w > 0 && w < 1) {
+			t.Errorf("%s weight %v out of range", name, w)
+		}
 	}
 }
 
@@ -109,7 +113,7 @@ func TestScoring(t *testing.T) {
 		{"enumeration burst", []cloudtrail.Event{
 			ev("1", 0, "p", cloudtrail.AccessDenied), ev("2", 1, "p", cloudtrail.AccessDenied), ev("3", 2, "p", cloudtrail.AccessDenied),
 			ev("4", 3, "p", cloudtrail.AccessDenied), ev("5", 4, "p", cloudtrail.AccessDenied),
-		}, 32.5}, // 1 - 0.9*0.75
+		}, 50.5}, // 1 - 0.9*0.55
 		{"cryptojacking chain", []cloudtrail.Event{
 			ev("1", 0, "p", cloudtrail.QuotaIncreaseRequest), ev("2", time.Minute, "p", cloudtrail.GPUInstanceLaunch),
 		}, 72}, // 1 - 0.8*0.7*0.5
@@ -222,5 +226,133 @@ func TestUnknownIndicatorIgnored(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Confidence != 0 || len(got[0].Contributors) != 0 {
 		t.Fatalf("unweighted indicator must contribute nothing: %+v", got)
+	}
+}
+
+func TestMultiRegionGPULaunch(t *testing.T) {
+	gpu := func(id, region string) cloudtrail.Event {
+		e := ev(id, 0, "p", cloudtrail.GPUInstanceLaunch)
+		e.Region = region
+		return e
+	}
+	two, err := Detect([]cloudtrail.Event{gpu("1", "us-east-1"), gpu("2", "us-west-2"), gpu("3", "us-west-2")}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := contributor(two[0], "multi_region_gpu_launch"); ok || two[0].Confidence != 30 {
+		t.Fatalf("two regions must not trigger the rule: %+v", two[0])
+	}
+	three, err := Detect([]cloudtrail.Event{gpu("1", "us-east-1"), gpu("2", "us-west-2"), gpu("3", "eu-west-1")}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, ok := contributor(three[0], "multi_region_gpu_launch")
+	if !ok || len(c.EventIDs) != 3 || three[0].Confidence != 58 { // 1 - 0.7*0.6
+		t.Fatalf("three regions must trigger the rule: %+v", three[0])
+	}
+}
+
+// Thresholds the bands are measured against: the CLI defaults for
+// -notify-min-confidence and -min-confidence.
+const (
+	alertThreshold       = 50.0
+	containmentThreshold = 85.0
+)
+
+type band string
+
+const (
+	bandNone        band = "no finding"
+	bandBelowAlert  band = "below alert threshold"
+	bandAlertOnly   band = "alert only"
+	bandContainable band = "containment eligible"
+)
+
+func bandOf(confidence float64) band {
+	switch {
+	case confidence >= containmentThreshold:
+		return bandContainable
+	case confidence >= alertThreshold:
+		return bandAlertOnly
+	default:
+		return bandBelowAlert
+	}
+}
+
+// fixtureBands is the tuning contract: the band of each replay fixture's
+// highest-confidence finding. Every fixture must be listed. When changing
+// weights, run this test; a band change must be a deliberate decision,
+// documented in the README's tuning table.
+var fixtureBands = map[string]band{
+	// Benign activity must not reach the alert threshold...
+	"benign_ci_deploy":            bandNone,
+	"benign_ml_single_gpu":        bandBelowAlert,
+	"benign_admin_onboarding":     bandBelowAlert,
+	"benign_trail_maintenance":    bandBelowAlert,
+	"benign_autoscaling_scaleout": bandBelowAlert,
+	// ...except a large GPU job right after a quota increase, which is
+	// indistinguishable from mining in CloudTrail alone. It alerts so a
+	// human can confirm, but must never be containment eligible.
+	"benign_gpu_training_job": bandAlertOnly,
+
+	// Attacks must at least alert.
+	"incident":                   bandContainable,
+	"attack_llmjacking":          bandContainable,
+	"attack_cryptojacking_quiet": bandContainable,
+	// Probing alone is suspicious but has no resource abuse yet.
+	"attack_key_enumeration": bandAlertOnly,
+}
+
+func TestFixtureBands(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join("..", "cloudtrail", "testdata", "*.json"))
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("no fixtures: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, path := range paths {
+		name := strings.TrimSuffix(filepath.Base(path), ".json")
+		seen[name] = true
+		t.Run(name, func(t *testing.T) {
+			want, ok := fixtureBands[name]
+			if !ok {
+				t.Fatalf("fixture %s has no expected band; add it to fixtureBands", name)
+			}
+			f, err := os.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer f.Close()
+			events, err := cloudtrail.Replay(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			findings, err := Detect(events, Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := bandNone
+			if len(findings) > 0 {
+				got = bandOf(findings[0].Confidence) // findings are sorted, highest first
+			}
+			if got != want {
+				top := "none"
+				if len(findings) > 0 {
+					top = fmt.Sprintf("%.1f (%s)", findings[0].Confidence, findings[0].Principal)
+				}
+				t.Fatalf("band %q, want %q; top finding %s", got, want, top)
+			}
+			if strings.HasPrefix(name, "benign_") {
+				for _, f := range findings {
+					if f.Confidence >= containmentThreshold {
+						t.Fatalf("benign finding is containment eligible: %.1f %s", f.Confidence, f.Principal)
+					}
+				}
+			}
+		})
+	}
+	for name := range fixtureBands {
+		if !seen[name] {
+			t.Errorf("fixtureBands lists %s but testdata has no such fixture", name)
+		}
 	}
 }

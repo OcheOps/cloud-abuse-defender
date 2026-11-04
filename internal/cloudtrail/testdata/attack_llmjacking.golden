@@ -1,0 +1,175 @@
+{
+  "events": [
+    {
+      "time": "2026-11-10T02:59:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000007",
+      "service": "sts",
+      "action": "GetCallerIdentity",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/reporting-bot",
+      "access_key_id": "AKIA************TBT1",
+      "source_ip": "203.0.113.77",
+      "user_agent": "python-requests/2.31.0"
+    },
+    {
+      "time": "2026-11-10T03:00:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000001",
+      "service": "iam",
+      "action": "ListUsers",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/reporting-bot",
+      "access_key_id": "AKIA************TBT1",
+      "source_ip": "203.0.113.77",
+      "user_agent": "python-requests/2.31.0",
+      "error_code": "AccessDenied",
+      "indicators": [
+        "access_denied"
+      ]
+    },
+    {
+      "time": "2026-11-10T03:00:01Z",
+      "event_id": "00000000-0000-0000-0000-000000000002",
+      "service": "s3",
+      "action": "ListBuckets",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/reporting-bot",
+      "access_key_id": "AKIA************TBT1",
+      "source_ip": "203.0.113.77",
+      "user_agent": "python-requests/2.31.0",
+      "error_code": "AccessDenied",
+      "indicators": [
+        "access_denied"
+      ]
+    },
+    {
+      "time": "2026-11-10T03:00:02Z",
+      "event_id": "00000000-0000-0000-0000-000000000003",
+      "service": "ec2",
+      "action": "DescribeRegions",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/reporting-bot",
+      "access_key_id": "AKIA************TBT1",
+      "source_ip": "203.0.113.77",
+      "user_agent": "python-requests/2.31.0",
+      "error_code": "AccessDenied",
+      "indicators": [
+        "access_denied"
+      ]
+    },
+    {
+      "time": "2026-11-10T03:00:03Z",
+      "event_id": "00000000-0000-0000-0000-000000000004",
+      "service": "lambda",
+      "action": "ListFunctions",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/reporting-bot",
+      "access_key_id": "AKIA************TBT1",
+      "source_ip": "203.0.113.77",
+      "user_agent": "python-requests/2.31.0",
+      "error_code": "AccessDenied",
+      "indicators": [
+        "access_denied"
+      ]
+    },
+    {
+      "time": "2026-11-10T03:00:04Z",
+      "event_id": "00000000-0000-0000-0000-000000000005",
+      "service": "secretsmanager",
+      "action": "ListSecrets",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/reporting-bot",
+      "access_key_id": "AKIA************TBT1",
+      "source_ip": "203.0.113.77",
+      "user_agent": "python-requests/2.31.0",
+      "error_code": "AccessDenied",
+      "indicators": [
+        "access_denied"
+      ]
+    },
+    {
+      "time": "2026-11-10T03:00:05Z",
+      "event_id": "00000000-0000-0000-0000-000000000006",
+      "service": "rds",
+      "action": "DescribeDBInstances",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/reporting-bot",
+      "access_key_id": "AKIA************TBT1",
+      "source_ip": "203.0.113.77",
+      "user_agent": "python-requests/2.31.0",
+      "error_code": "AccessDenied",
+      "indicators": [
+        "access_denied"
+      ]
+    },
+    {
+      "time": "2026-11-10T03:01:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000008",
+      "service": "bedrock",
+      "action": "ListFoundationModels",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/reporting-bot",
+      "access_key_id": "AKIA************TBT1",
+      "source_ip": "203.0.113.77",
+      "user_agent": "python-requests/2.31.0"
+    },
+    {
+      "time": "2026-11-10T03:02:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000009",
+      "service": "bedrock",
+      "action": "DeleteModelInvocationLoggingConfiguration",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/reporting-bot",
+      "access_key_id": "AKIA************TBT1",
+      "source_ip": "203.0.113.77",
+      "user_agent": "python-requests/2.31.0",
+      "indicators": [
+        "bedrock_logging_disabled"
+      ]
+    },
+    {
+      "time": "2026-11-10T03:03:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000010",
+      "service": "bedrock",
+      "action": "PutUseCaseForModelAccess",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/reporting-bot",
+      "access_key_id": "AKIA************TBT1",
+      "source_ip": "203.0.113.77",
+      "user_agent": "python-requests/2.31.0",
+      "indicators": [
+        "bedrock_model_access_change"
+      ]
+    }
+  ],
+  "summary": {
+    "events": 10,
+    "events_with_indicators": 8,
+    "first_event_time": "2026-11-10T02:59:00Z",
+    "last_event_time": "2026-11-10T03:03:00Z",
+    "by_indicator": {
+      "access_denied": 6,
+      "bedrock_logging_disabled": 1,
+      "bedrock_model_access_change": 1
+    }
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "Records": [
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLEML-RESEA",
+        "arn": "arn:aws:iam::123456789012:user/ml-researcher",
+        "accountId": "123456789012",
+        "userName": "ml-researcher",
+        "accessKeyId": "AKIAEXAMPLEMLRESRCH1"
+      },
+      "eventTime": "2026-11-05T14:00:00Z",
+      "eventSource": "ec2.amazonaws.com",
+      "eventName": "DescribeInstanceTypes",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "192.0.2.10",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": null,
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000001",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLEML-RESEA",
+        "arn": "arn:aws:iam::123456789012:user/ml-researcher",
+        "accountId": "123456789012",
+        "userName": "ml-researcher",
+        "accessKeyId": "AKIAEXAMPLEMLRESRCH1"
+      },
+      "eventTime": "2026-11-05T14:01:00Z",
+      "eventSource": "ec2.amazonaws.com",
+      "eventName": "RunInstances",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "192.0.2.10",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": {
+        "instancesSet": {
+          "items": [
+            {
+              "imageId": "ami-0example",
+              "minCount": 1,
+              "maxCount": 1
+            }
+          ]
+        },
+        "instanceType": "g5.xlarge"
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000002",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLEML-RESEA",
+        "arn": "arn:aws:iam::123456789012:user/ml-researcher",
+        "accountId": "123456789012",
+        "userName": "ml-researcher",
+        "accessKeyId": "AKIAEXAMPLEMLRESRCH1"
+      },
+      "eventTime": "2026-11-05T14:05:00Z",
+      "eventSource": "bedrock.amazonaws.com",
+      "eventName": "ListFoundationModels",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "192.0.2.10",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": null,
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000003",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    }
+  ]
+}

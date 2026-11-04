@@ -1,0 +1,152 @@
+{
+  "Records": [
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLEPLATFORM",
+        "arn": "arn:aws:iam::123456789012:user/platform-admin",
+        "accountId": "123456789012",
+        "userName": "platform-admin",
+        "accessKeyId": "AKIAEXAMPLEPLATADMN1"
+      },
+      "eventTime": "2026-11-06T10:00:00Z",
+      "eventSource": "iam.amazonaws.com",
+      "eventName": "CreateUser",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "192.0.2.10",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": {
+        "userName": "new-analyst"
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000001",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLEPLATFORM",
+        "arn": "arn:aws:iam::123456789012:user/platform-admin",
+        "accountId": "123456789012",
+        "userName": "platform-admin",
+        "accessKeyId": "AKIAEXAMPLEPLATADMN1"
+      },
+      "eventTime": "2026-11-06T10:00:30Z",
+      "eventSource": "iam.amazonaws.com",
+      "eventName": "CreateLoginProfile",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "192.0.2.10",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": {
+        "userName": "new-analyst"
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000002",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLEPLATFORM",
+        "arn": "arn:aws:iam::123456789012:user/platform-admin",
+        "accountId": "123456789012",
+        "userName": "platform-admin",
+        "accessKeyId": "AKIAEXAMPLEPLATADMN1"
+      },
+      "eventTime": "2026-11-06T10:01:00Z",
+      "eventSource": "iam.amazonaws.com",
+      "eventName": "AttachUserPolicy",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "192.0.2.10",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": null,
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000003",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLEPLATFORM",
+        "arn": "arn:aws:iam::123456789012:user/platform-admin",
+        "accountId": "123456789012",
+        "userName": "platform-admin",
+        "accessKeyId": "AKIAEXAMPLEPLATADMN1"
+      },
+      "eventTime": "2026-11-06T10:05:00Z",
+      "eventSource": "s3.amazonaws.com",
+      "eventName": "GetBucketPolicy",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "192.0.2.10",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": null,
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000004",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true,
+      "errorCode": "AccessDenied"
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLEPLATFORM",
+        "arn": "arn:aws:iam::123456789012:user/platform-admin",
+        "accountId": "123456789012",
+        "userName": "platform-admin",
+        "accessKeyId": "AKIAEXAMPLEPLATADMN1"
+      },
+      "eventTime": "2026-11-06T10:06:00Z",
+      "eventSource": "kms.amazonaws.com",
+      "eventName": "DescribeKey",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "192.0.2.10",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": null,
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000005",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true,
+      "errorCode": "AccessDeniedException"
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLEPLATFORM",
+        "arn": "arn:aws:iam::123456789012:user/platform-admin",
+        "accountId": "123456789012",
+        "userName": "platform-admin",
+        "accessKeyId": "AKIAEXAMPLEPLATADMN1"
+      },
+      "eventTime": "2026-11-06T10:20:00Z",
+      "eventSource": "servicequotas.amazonaws.com",
+      "eventName": "RequestServiceQuotaIncrease",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "192.0.2.10",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": {
+        "serviceCode": "ec2",
+        "quotaCode": "L-1216C47A",
+        "desiredValue": 256.0
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000006",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    }
+  ]
+}
