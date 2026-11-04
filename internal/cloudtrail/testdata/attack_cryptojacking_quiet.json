@@ -1,0 +1,133 @@
+{
+  "Records": [
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLELEGACY-B",
+        "arn": "arn:aws:iam::123456789012:user/legacy-backup",
+        "accountId": "123456789012",
+        "userName": "legacy-backup",
+        "accessKeyId": "AKIAEXAMPLELEGACYBK1"
+      },
+      "eventTime": "2026-11-11T01:00:00Z",
+      "eventSource": "servicequotas.amazonaws.com",
+      "eventName": "RequestServiceQuotaIncrease",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.91",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": {
+        "serviceCode": "ec2",
+        "quotaCode": "L-DB2E81BA",
+        "desiredValue": 512.0
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000001",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLELEGACY-B",
+        "arn": "arn:aws:iam::123456789012:user/legacy-backup",
+        "accountId": "123456789012",
+        "userName": "legacy-backup",
+        "accessKeyId": "AKIAEXAMPLELEGACYBK1"
+      },
+      "eventTime": "2026-11-11T01:20:00Z",
+      "eventSource": "ec2.amazonaws.com",
+      "eventName": "RunInstances",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.91",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": {
+        "instancesSet": {
+          "items": [
+            {
+              "imageId": "ami-0example",
+              "minCount": 10,
+              "maxCount": 10
+            }
+          ]
+        },
+        "instanceType": "g4dn.12xlarge"
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000002",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLELEGACY-B",
+        "arn": "arn:aws:iam::123456789012:user/legacy-backup",
+        "accountId": "123456789012",
+        "userName": "legacy-backup",
+        "accessKeyId": "AKIAEXAMPLELEGACYBK1"
+      },
+      "eventTime": "2026-11-11T01:21:00Z",
+      "eventSource": "ec2.amazonaws.com",
+      "eventName": "RunInstances",
+      "awsRegion": "us-west-2",
+      "sourceIPAddress": "203.0.113.91",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": {
+        "instancesSet": {
+          "items": [
+            {
+              "imageId": "ami-0example",
+              "minCount": 10,
+              "maxCount": 10
+            }
+          ]
+        },
+        "instanceType": "g4dn.12xlarge"
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000003",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLELEGACY-B",
+        "arn": "arn:aws:iam::123456789012:user/legacy-backup",
+        "accountId": "123456789012",
+        "userName": "legacy-backup",
+        "accessKeyId": "AKIAEXAMPLELEGACYBK1"
+      },
+      "eventTime": "2026-11-11T01:22:00Z",
+      "eventSource": "ec2.amazonaws.com",
+      "eventName": "RunInstances",
+      "awsRegion": "eu-west-1",
+      "sourceIPAddress": "203.0.113.91",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": {
+        "instancesSet": {
+          "items": [
+            {
+              "imageId": "ami-0example",
+              "minCount": 10,
+              "maxCount": 10
+            }
+          ]
+        },
+        "instanceType": "g5.12xlarge"
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000004",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    }
+  ]
+}

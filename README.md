@@ -91,11 +91,33 @@ go run ./cmd/cad detect -file internal/cloudtrail/testdata/incident.json \
 
 - each **distinct** indicator adds its weight once, so repeating it doesn't stack (weights are in `internal/detect`);
 - attack chains add weight when signals appear together: `cryptojacking_chain` (GPU launch + quota increase or bulk launch), `llmjacking_chain` (Bedrock logging removed + model-access change) and `evasion_with_resource_abuse` (CloudTrail/GuardDuty tampering + GPU, bulk or Bedrock activity);
-- `enumeration_burst` applies at 5 or more access-denied events.
+- `enumeration_burst` applies at 5 or more access-denied events, and `multi_region_gpu_launch` when GPU instances are launched in 3 or more regions.
 
 Every contributor is listed with its weight and the event IDs behind it. With a cost source (`-usage`/`-pricing`, or an explicit `-hourly-rate`), each finding also gets a policy `decision`; without one, only findings are printed. On the sample incident the `ci-deploy` user scores 98.6 and is eligible for containment, while the separate root activity scores 36 and stays alert-only.
 
-The weights are starting estimates, not tuned on real incidents: review them against your own environment before relying on the scores.
+#### Tuning fixtures
+
+The weights are tuned against synthetic replay fixtures in `internal/cloudtrail/testdata/`, scored at the default thresholds: alert at 50, containment eligible at 85.
+
+| Fixture | Scenario | Score | Band |
+|---|---|---|---|
+| `benign_ci_deploy` | CI role deploys a stack and two `m6i` instances | none | no finding |
+| `benign_autoscaling_scaleout` | Auto Scaling launches 12 instances, twice | 25.0 | below alert |
+| `benign_ml_single_gpu` | researcher starts one `g5.xlarge` | 30.0 | below alert |
+| `benign_admin_onboarding` | admin creates a user and login, hits 2 denials, raises a vCPU quota | 42.4 | below alert |
+| `benign_trail_maintenance` | security engineer changes trail event selectors | 45.0 | below alert |
+| `benign_gpu_training_job` | quota increase, then 4 × `p4d.24xlarge` in one region | 72.0 | **alert only** |
+| `attack_key_enumeration` | old key probes 8 services, all denied | 50.5 | alert only |
+| `attack_cryptojacking_quiet` | quota increase, 30 GPU instances across 3 regions, no evasion | 87.4 | containment eligible |
+| `attack_llmjacking` | probing, Bedrock logging deleted, model access requested | 88.9 | containment eligible |
+| `incident` | combined LLMjacking + cryptojacking + `StopLogging` | 98.6 | containment eligible |
+
+Known limits:
+- **A real GPU training job looks like the start of mining.** In CloudTrail alone it scores 72 and alerts. That's deliberate: a human confirms, and it can never reach containment. Mining across 3 or more regions is what pushes the attack fixture past 85.
+- **Change to a trail's configuration scores 45**, just under the alert threshold. Alerting on every trail edit would be noisy, but tampering together with resource abuse is still caught by `evasion_with_resource_abuse`.
+- The fixtures are synthetic. Add replays of your own normal activity before relying on the scores.
+
+`TestFixtureBands` in `internal/detect` fails if any fixture changes band or has no expected band, so weight changes have to be deliberate. To add a fixture, put the log in `testdata/`, give it a band in `fixtureBands`, and run `go test ./internal/cloudtrail -update` to create its golden file.
 
 ### Send alerts
 

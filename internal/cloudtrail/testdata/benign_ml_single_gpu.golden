@@ -1,0 +1,57 @@
+{
+  "events": [
+    {
+      "time": "2026-11-05T14:00:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000001",
+      "service": "ec2",
+      "action": "DescribeInstanceTypes",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/ml-researcher",
+      "access_key_id": "AKIA************RCH1",
+      "source_ip": "192.0.2.10",
+      "user_agent": "aws-cli/2.15.0"
+    },
+    {
+      "time": "2026-11-05T14:01:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000002",
+      "service": "ec2",
+      "action": "RunInstances",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/ml-researcher",
+      "access_key_id": "AKIA************RCH1",
+      "source_ip": "192.0.2.10",
+      "user_agent": "aws-cli/2.15.0",
+      "instance_type": "g5.xlarge",
+      "instance_count": 1,
+      "indicators": [
+        "gpu_instance_launch"
+      ]
+    },
+    {
+      "time": "2026-11-05T14:05:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000003",
+      "service": "bedrock",
+      "action": "ListFoundationModels",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/ml-researcher",
+      "access_key_id": "AKIA************RCH1",
+      "source_ip": "192.0.2.10",
+      "user_agent": "aws-cli/2.15.0"
+    }
+  ],
+  "summary": {
+    "events": 3,
+    "events_with_indicators": 1,
+    "first_event_time": "2026-11-05T14:00:00Z",
+    "last_event_time": "2026-11-05T14:05:00Z",
+    "by_indicator": {
+      "gpu_instance_launch": 1
+    }
+  }
+}
