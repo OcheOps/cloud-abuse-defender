@@ -31,6 +31,9 @@ scoped response executor (future, disabled by default)
 ## CloudTrail adapter
 `internal/cloudtrail` parses CloudTrail log files (S3 delivery format, optionally gzipped, capped at 256 MiB decoded) without calling AWS. Records are normalized into minimal events: raw `requestParameters`/`responseElements` are never carried forward, only fields an indicator needs (such as instance type and count) are extracted, access key IDs are masked and user agents are truncated. Indicators are static, named rules so every tag can be explained; correlation and confidence scoring belong to the detector stage. Replay tests compare normalized output for fixture logs with checked-in golden files.
 
+## CloudWatch metrics
+`internal/cloudwatch` generates GetMetricData queries for Bedrock `InputTokenCount`/`OutputTokenCount` (Sum, per `ModelId`) and converts the AWS CLI's results into a `cost.Usage`. Fetching stays with the operator's AWS CLI and credentials, so this project still holds no cloud keys. The model ID travels in each query's label, results must be `Complete` and inside the requested window, and anything ambiguous is rejected rather than estimated.
+
 ## Detector
 `internal/detect` groups indicator events by principal (ARN, else masked access key) and splits them into findings at gaps longer than the correlation window. Confidence is a noisy-OR over distinct indicator weights plus attack-chain rules, so the score is bounded below 100, repeating a signal can't inflate it, and every point traces to named contributors and event IDs. The detector supplies `ThreatConfidence` to the policy engine; it never decides on containment itself.
 

@@ -1,0 +1,33 @@
+{
+  "MetricDataResults": [
+    {
+      "Id": "m0_in",
+      "Label": "cad:InputTokenCount:example.text-model-large",
+      "Timestamps": ["2026-11-04T10:25:00+00:00", "2026-11-04T10:20:00+00:00", "2026-11-04T10:00:00+00:00"],
+      "Values": [1500000.0, 1500000.0, 1000000.0],
+      "StatusCode": "Complete"
+    },
+    {
+      "Id": "m0_out",
+      "Label": "cad:OutputTokenCount:example.text-model-large",
+      "Timestamps": ["2026-11-04T10:25:00+00:00", "2026-11-04T10:00:00+00:00"],
+      "Values": [600000.0, 400000.0],
+      "StatusCode": "Complete"
+    },
+    {
+      "Id": "m1_in",
+      "Label": "cad:InputTokenCount:example.text-model-small",
+      "Timestamps": ["2026-11-04T10:10:00+00:00"],
+      "Values": [2000000.0],
+      "StatusCode": "Complete"
+    },
+    {
+      "Id": "m1_out",
+      "Label": "cad:OutputTokenCount:example.text-model-small",
+      "Timestamps": ["2026-11-04T10:10:00+00:00"],
+      "Values": [400000.0],
+      "StatusCode": "Complete"
+    }
+  ],
+  "Messages": []
+}

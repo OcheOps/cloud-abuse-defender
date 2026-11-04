@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/OcheOps/cloud-abuse-defender/internal/alert"
+	"github.com/OcheOps/cloud-abuse-defender/internal/cloudwatch"
+	"github.com/OcheOps/cloud-abuse-defender/internal/cost"
 	"github.com/OcheOps/cloud-abuse-defender/internal/policy"
 )
 
@@ -491,6 +493,104 @@ func TestRunDetectDedupeErrors(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, code, stderr := runDetectCmd(t, append([]string{"-file", incidentLog}, tc.args...)...)
+			if code != 2 || !strings.Contains(stderr, tc.want) {
+				t.Fatalf("exit %d, stderr %q, want %q", code, stderr, tc.want)
+			}
+		})
+	}
+}
+
+const (
+	metricResults = "../../internal/cloudwatch/testdata/get-metric-data.json"
+	listMetrics   = "../../internal/cloudwatch/testdata/list-metrics.json"
+)
+
+func runCmd(t *testing.T, args ...string) (string, int, string) {
+	t.Helper()
+	var out, errOut bytes.Buffer
+	code := run(args, &out, &errOut, now)
+	if code != 0 && out.Len() != 0 {
+		t.Fatalf("unexpected stdout on failure: %s", out.String())
+	}
+	return out.String(), code, errOut.String()
+}
+
+func TestRunBedrockQueries(t *testing.T) {
+	for name, args := range map[string][]string{
+		"models flag":  {"-models", "example.text-model-small,example.text-model-large"},
+		"list metrics": {"-list-metrics", listMetrics},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, code, stderr := runCmd(t, append([]string{"bedrock-queries"}, args...)...)
+			if code != 0 {
+				t.Fatalf("exit %d: %s", code, stderr)
+			}
+			var q []cloudwatch.Query
+			if err := json.Unmarshal([]byte(out), &q); err != nil {
+				t.Fatal(err)
+			}
+			if len(q) != 4 || q[0].Label != "cad:InputTokenCount:example.text-model-large" || q[0].MetricStat.Period != 300 {
+				t.Fatalf("unexpected queries: %+v", q)
+			}
+		})
+	}
+}
+
+func TestRunBedrockUsageFeedsPipeline(t *testing.T) {
+	out, code, stderr := runCmd(t, "bedrock-usage", "-results", metricResults, "-region", "us-east-1",
+		"-start", "2026-11-04T10:00:00Z", "-end", "2026-11-04T10:30:00Z")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	u, err := cost.LoadUsage(strings.NewReader(out))
+	if err != nil {
+		t.Fatalf("output is not a valid usage file: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "usage.json")
+	if err := os.WriteFile(path, []byte(out), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := runUsageFile(t, path)
+	if len(u.Models) != 2 || got.Estimate.HourlyCostUSD != 56 {
+		t.Fatalf("converted usage must price like the example: %+v", got.Estimate)
+	}
+}
+
+func runUsageFile(t *testing.T, usagePath string) estimateOutput {
+	t.Helper()
+	out, code, stderr := runCmd(t, "-usage", usagePath, "-pricing", examplePricing)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	var got estimateOutput
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func TestRunBedrockErrors(t *testing.T) {
+	usage := func(extra ...string) []string {
+		return append([]string{"bedrock-usage", "-results", metricResults, "-region", "us-east-1"}, extra...)
+	}
+	for name, tc := range map[string]struct {
+		args []string
+		want string
+	}{
+		"queries no source":    {[]string{"bedrock-queries"}, "exactly one of"},
+		"queries both sources": {[]string{"bedrock-queries", "-models", "a", "-list-metrics", listMetrics}, "exactly one of"},
+		"queries bad period":   {[]string{"bedrock-queries", "-models", "a", "-period", "90"}, "multiple of 60"},
+		"queries missing file": {[]string{"bedrock-queries", "-list-metrics", "nope.json"}, "nope.json"},
+		"queries extra args":   {[]string{"bedrock-queries", "-models", "a", "x"}, "unexpected arguments"},
+		"usage missing flags":  {[]string{"bedrock-usage", "-results", metricResults}, "are required"},
+		"usage bad start":      {usage("-start", "yesterday", "-end", "2026-11-04T10:30:00Z"), "-start"},
+		"usage bad end":        {usage("-start", "2026-11-04T10:00:00Z", "-end", "later"), "-end"},
+		"usage wrong window":   {usage("-start", "2026-11-04T10:10:00Z", "-end", "2026-11-04T10:30:00Z"), "outside the window"},
+		"usage missing file":   {[]string{"bedrock-usage", "-results", "nope.json", "-region", "r", "-start", "2026-11-04T10:00:00Z", "-end", "2026-11-04T10:30:00Z"}, "nope.json"},
+		"usage extra args":     {append(usage("-start", "2026-11-04T10:00:00Z", "-end", "2026-11-04T10:30:00Z"), "x"), "unexpected arguments"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, code, stderr := runCmd(t, tc.args...)
 			if code != 2 || !strings.Contains(stderr, tc.want) {
 				t.Fatalf("exit %d, stderr %q, want %q", code, stderr, tc.want)
 			}
