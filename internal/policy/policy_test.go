@@ -26,6 +26,14 @@ func TestEvaluate(t *testing.T) {
 		{"threshold and confidence boundary", func(in *Input) {
 			in.HourlyCostUSD, in.HorizonHours, in.ThreatConfidence, in.AllowContainment = 5, 20, 85, true
 		}, RecommendContainment, true, ReasonEligible, 100},
+		{"degraded forecast", func(in *Input) {
+			in.AllowContainment = true
+			in.ForecastWarnings = []string{"pricing is stale"}
+		}, Alert, false, ReasonDegradedForecast, 600},
+		{"low confidence wins over degraded forecast", func(in *Input) {
+			in.ThreatConfidence = 10
+			in.ForecastWarnings = []string{"pricing is stale"}
+		}, Alert, false, ReasonLowConfidence, 600},
 		{"zero spend", func(in *Input) { in.HourlyCostUSD = 0; in.AllowContainment = true }, Alert, false, ReasonBelowThreshold, 0},
 	}
 	for _, tt := range tests {
@@ -83,5 +91,17 @@ func TestRejectInvalid(t *testing.T) {
 func TestZeroValueRejected(t *testing.T) {
 	if d, err := Evaluate(Input{AllowContainment: true}); err == nil {
 		t.Fatalf("zero-value input accepted: %+v", d)
+	}
+}
+
+func TestDecisionEchoesForecastWarnings(t *testing.T) {
+	in := valid()
+	in.ForecastWarnings = []string{"a", "b"}
+	d, err := Evaluate(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.ForecastWarnings) != 2 || d.ForecastWarnings[0] != "a" {
+		t.Fatalf("warnings not echoed: %+v", d)
 	}
 }

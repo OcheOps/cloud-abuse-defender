@@ -26,6 +26,7 @@ Initial components:
 1. Telemetry adapters (planned): AWS CloudTrail and Bedrock metrics, host agent, Kubernetes events.
 2. Normalizer and detector (planned): event aggregation, anomaly detection, cryptominer indicators.
 3. **Policy engine (implemented)**: pure Go spending projection + risk gate.
+   **Bedrock cost estimator (implemented)**: prices observed token usage with a versioned pricing table and flags unreliable forecasts.
 4. Response orchestration (planned): notifications, approval workflows, reversible scoped containment.
 5. Evidence store (planned): immutable incident records with sensitive fields redacted.
 
@@ -40,11 +41,28 @@ go run ./cmd/cad -hourly-rate 25 -hours 24 -threshold 100 -confidence 90
 
 This is a **simulation**, not a live billing feed. It prints a JSON decision and never calls cloud APIs or terminates anything. Default response mode is alert-only; `-allow-containment` opts into a *recommendation* only, not execution. `-threshold` and `-min-confidence` must be greater than zero, so neither gate can be disabled by accident.
 
+### Estimate the rate from Bedrock usage
+
+Instead of supplying `-hourly-rate` by hand, give the CLI a token-usage observation and a versioned pricing table:
+
+```sh
+go run ./cmd/cad -usage examples/usage.example.json -pricing examples/pricing.example.json -allow-containment
+```
+
+The output contains the `estimate` (per-model cost, observed cost, hourly rate and `pricing_version`) and the `decision`. The prices in `examples/pricing.example.json` are **illustrative placeholders**: replace them with current rates for your region from AWS before relying on the result.
+
+The forecast is flagged as unreliable, and the decision drops to **alert-only**, when:
+- the pricing table is older than `-max-pricing-age` (default 30 days) or not yet in effect,
+- usage includes a model with no price in the table, or
+- the observation window is shorter than `-min-window` (default 15 minutes).
+
+Usage in one region can't be priced with another region's table. Only on-demand token pricing is modelled; provisioned throughput, batch discounts and private pricing are not.
+
 ## Roadmap
 
 - [x] Initial Go module and tested policy evaluator
 - [x] Safe CLI simulation
-- [ ] AWS Bedrock token-cost estimation and pricing-version tracking
+- [x] AWS Bedrock token-cost estimation and pricing-version tracking (offline; CloudWatch metrics ingestion still planned)
 - [ ] CloudTrail adapter with event replay tests
 - [ ] Slack/webhook alert integration
 - [ ] Host runtime cryptojacking indicators

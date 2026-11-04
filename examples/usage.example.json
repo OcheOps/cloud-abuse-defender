@@ -1,0 +1,17 @@
+{
+  "region": "us-east-1",
+  "window_start": "2026-11-04T10:00:00Z",
+  "window_end": "2026-11-04T10:30:00Z",
+  "models": [
+    {
+      "model_id": "example.text-model-large",
+      "input_tokens": 4000000,
+      "output_tokens": 1000000
+    },
+    {
+      "model_id": "example.text-model-small",
+      "input_tokens": 2000000,
+      "output_tokens": 400000
+    }
+  ]
+}
