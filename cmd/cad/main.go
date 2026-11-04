@@ -8,6 +8,7 @@
 //	                                 -notify slack|webhook sends alerts to $CAD_WEBHOOK_URL
 //	cad bedrock-queries -models a,b  write CloudWatch queries for Bedrock token metrics
 //	cad bedrock-usage -results <f>   convert "aws cloudwatch get-metric-data" output to a usage file
+//	cad evidence-verify -file <log>  verify a tamper-evident evidence log
 //
 // The hourly spend comes either from -hourly-rate, or from a Bedrock usage
 // observation priced with a versioned table (-usage and -pricing).
@@ -29,6 +30,7 @@ import (
 	"github.com/OcheOps/cloud-abuse-defender/internal/cloudwatch"
 	"github.com/OcheOps/cloud-abuse-defender/internal/cost"
 	"github.com/OcheOps/cloud-abuse-defender/internal/detect"
+	"github.com/OcheOps/cloud-abuse-defender/internal/evidence"
 	"github.com/OcheOps/cloud-abuse-defender/internal/policy"
 )
 
@@ -47,6 +49,8 @@ func run(args []string, stdout, stderr io.Writer, now time.Time) int {
 			return runBedrockQueries(args[1:], stdout, stderr)
 		case "bedrock-usage":
 			return runBedrockUsage(args[1:], stdout, stderr)
+		case "evidence-verify":
+			return runEvidenceVerify(args[1:], stdout, stderr)
 		}
 	}
 	return runPolicy(args, stdout, stderr, now)
@@ -187,6 +191,7 @@ func runCloudTrail(args []string, stdout, stderr io.Writer) int {
 }
 
 type detectedFinding struct {
+	IncidentID string `json:"incident_id"`
 	detect.Finding
 	// Decision is present only when a cost source was given.
 	Decision *policy.Decision `json:"decision,omitempty"`
@@ -217,6 +222,30 @@ type detectOutput struct {
 	Findings      []detectedFinding `json:"findings"`
 	Estimate      *cost.Estimate    `json:"estimate,omitempty"`
 	Notifications []notification    `json:"notifications,omitempty"`
+	// EvidenceHead is the end of the evidence chain after this run.
+	EvidenceHead *evidence.Head `json:"evidence_head,omitempty"`
+}
+
+// findingEvidence is the evidence-log record for one finding: everything
+// needed to explain the decision later, including the versions that made it.
+type findingEvidence struct {
+	Finding          detect.Finding   `json:"finding"`
+	Decision         *policy.Decision `json:"decision,omitempty"`
+	PricingVersion   string           `json:"pricing_version,omitempty"`
+	HourlyCostUSD    float64          `json:"hourly_cost_usd,omitempty"`
+	ForecastWarnings []string         `json:"forecast_warnings,omitempty"`
+	PolicyVersion    string           `json:"policy_version"`
+	WeightsVersion   string           `json:"weights_version"`
+}
+
+// notificationEvidence records a delivery attempt. The webhook URL is never recorded.
+type notificationEvidence struct {
+	Format  alert.Format  `json:"format"`
+	Status  string        `json:"status"`
+	Verdict alert.Verdict `json:"verdict,omitempty"`
+	Error   string        `json:"error,omitempty"`
+	// FindingRecord is the hash of the finding record this notification is about.
+	FindingRecord string `json:"finding_record,omitempty"`
 }
 
 func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
@@ -229,6 +258,7 @@ func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
 	dryRun := fs.Bool("notify-dry-run", false, "render alert payloads into the output instead of sending them")
 	statePath := fs.String("alert-state", "", "state file of delivered alerts; enables de-duplication (created if missing, never written on dry runs)")
 	suppressFor := fs.Duration("alert-suppress-for", 24*time.Hour, "with -alert-state, re-send an unchanged alert only after this long")
+	evidencePath := fs.String("evidence-log", "", "append a tamper-evident record of each finding and delivered alert to this file")
 	cf := registerCostFlags(fs)
 	set, ok := parseFlags(fs, args, stderr)
 	if !ok {
@@ -304,7 +334,32 @@ func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
 			}
 			df.Decision = &d
 		}
+		df.IncidentID = f.IncidentID()
 		out.Findings = append(out.Findings, df)
+	}
+
+	// Evidence is written before any alert goes out, so every alert can
+	// point at the record that explains it.
+	var evLog *evidence.Log
+	recordHash := make([]string, len(out.Findings))
+	if *evidencePath != "" {
+		if evLog, err = evidence.Open(*evidencePath); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+		defer evLog.Close()
+		for i, df := range out.Findings {
+			ev := findingEvidence{Finding: df.Finding, Decision: df.Decision, PolicyVersion: policy.Version, WeightsVersion: detect.WeightsVersion}
+			if est != nil {
+				ev.PricingVersion, ev.HourlyCostUSD, ev.ForecastWarnings = est.PricingVersion, est.HourlyCostUSD, est.Warnings
+			}
+			rec, err := evLog.Append("finding", df.IncidentID, ev, now)
+			if err != nil {
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
+			recordHash[i] = rec.Hash
+		}
 	}
 
 	var state *alert.State
@@ -318,9 +373,10 @@ func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
 	code := 0
 	stateChanged := false
 	if sender != nil {
-		for _, df := range out.Findings {
+		for i, df := range out.Findings {
 			n := notification{Principal: df.Principal, First: df.First}
 			a := alert.FromFinding(df.Finding, df.Decision, est, now)
+			a.EvidenceHash = recordHash[i]
 			if state != nil && df.Confidence >= *notifyMin {
 				n.Verdict = state.Check(a, *window, *suppressFor, now)
 				if n.Verdict == alert.VerdictEscalated || n.Verdict == alert.VerdictReminder {
@@ -356,7 +412,19 @@ func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
 				}
 			}
 			out.Notifications = append(out.Notifications, n)
+			// Dry runs and skipped findings deliver nothing, so there is nothing to record.
+			if evLog != nil && (n.Status == "sent" || n.Status == "failed" || n.Status == "suppressed_duplicate") {
+				ne := notificationEvidence{Format: sender.Format, Status: n.Status, Verdict: n.Verdict, Error: n.Error, FindingRecord: recordHash[i]}
+				if _, err := evLog.Append("notification", df.IncidentID, ne, now); err != nil {
+					fmt.Fprintln(stderr, err)
+					code = 1
+				}
+			}
 		}
+	}
+	if evLog != nil {
+		head := evLog.Head()
+		out.EvidenceHead = &head
 	}
 	if stateChanged {
 		if err := state.Save(*statePath, now); err != nil {
@@ -373,6 +441,30 @@ func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
 		fmt.Fprintln(stderr, "one or more alerts could not be delivered")
 	}
 	return code
+}
+
+func runEvidenceVerify(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("cad evidence-verify", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	path := fs.String("file", "", "evidence log written by -evidence-log; required")
+	expect := fs.String("expect-record", "", "record hash kept outside the log (for example an alert's evidence_hash); fails if it is not in the chain")
+	if _, ok := parseFlags(fs, args, stderr); !ok {
+		return 2
+	}
+	if *path == "" {
+		fmt.Fprintln(stderr, "-file is required")
+		return 2
+	}
+	head, found, err := evidence.VerifyFileContains(*path, *expect)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if *expect != "" && !found {
+		fmt.Fprintf(stderr, "log verifies but has no record %s (it was truncated past that record or rebuilt)\n", *expect)
+		return 1
+	}
+	return encode(stdout, stderr, head)
 }
 
 func runBedrockQueries(args []string, stdout, stderr io.Writer) int {
