@@ -1,0 +1,88 @@
+{
+  "Records": [
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLEML-PLATF",
+        "arn": "arn:aws:iam::123456789012:user/ml-platform",
+        "accountId": "123456789012",
+        "userName": "ml-platform",
+        "accessKeyId": "AKIAEXAMPLEMLPLATFM1"
+      },
+      "eventTime": "2026-11-09T08:00:00Z",
+      "eventSource": "servicequotas.amazonaws.com",
+      "eventName": "RequestServiceQuotaIncrease",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "192.0.2.10",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": {
+        "serviceCode": "ec2",
+        "quotaCode": "L-417A185B",
+        "desiredValue": 384.0
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000001",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLEML-PLATF",
+        "arn": "arn:aws:iam::123456789012:user/ml-platform",
+        "accountId": "123456789012",
+        "userName": "ml-platform",
+        "accessKeyId": "AKIAEXAMPLEMLPLATFM1"
+      },
+      "eventTime": "2026-11-09T08:45:00Z",
+      "eventSource": "ec2.amazonaws.com",
+      "eventName": "RunInstances",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "192.0.2.10",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": {
+        "instancesSet": {
+          "items": [
+            {
+              "imageId": "ami-0example",
+              "minCount": 4,
+              "maxCount": 4
+            }
+          ]
+        },
+        "instanceType": "p4d.24xlarge"
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000002",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLEML-PLATF",
+        "arn": "arn:aws:iam::123456789012:user/ml-platform",
+        "accountId": "123456789012",
+        "userName": "ml-platform",
+        "accessKeyId": "AKIAEXAMPLEMLPLATFM1"
+      },
+      "eventTime": "2026-11-09T08:46:00Z",
+      "eventSource": "ec2.amazonaws.com",
+      "eventName": "CreateTags",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "192.0.2.10",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": null,
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000003",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    }
+  ]
+}

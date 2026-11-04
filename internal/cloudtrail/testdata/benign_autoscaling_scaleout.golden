@@ -1,0 +1,47 @@
+{
+  "events": [
+    {
+      "time": "2026-11-08T18:00:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000001",
+      "service": "ec2",
+      "action": "RunInstances",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "AssumedRole",
+      "principal_arn": "arn:aws:sts::123456789012:assumed-role/AWSServiceRoleForAutoScaling/AutoScaling",
+      "source_ip": "autoscaling.amazonaws.com",
+      "user_agent": "autoscaling.amazonaws.com",
+      "instance_type": "c6i.xlarge",
+      "instance_count": 12,
+      "indicators": [
+        "bulk_instance_launch"
+      ]
+    },
+    {
+      "time": "2026-11-08T18:10:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000002",
+      "service": "ec2",
+      "action": "RunInstances",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "AssumedRole",
+      "principal_arn": "arn:aws:sts::123456789012:assumed-role/AWSServiceRoleForAutoScaling/AutoScaling",
+      "source_ip": "autoscaling.amazonaws.com",
+      "user_agent": "autoscaling.amazonaws.com",
+      "instance_type": "c6i.xlarge",
+      "instance_count": 12,
+      "indicators": [
+        "bulk_instance_launch"
+      ]
+    }
+  ],
+  "summary": {
+    "events": 2,
+    "events_with_indicators": 2,
+    "first_event_time": "2026-11-08T18:00:00Z",
+    "last_event_time": "2026-11-08T18:10:00Z",
+    "by_indicator": {
+      "bulk_instance_launch": 2
+    }
+  }
+}

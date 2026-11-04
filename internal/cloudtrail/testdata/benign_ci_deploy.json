@@ -1,0 +1,149 @@
+{
+  "Records": [
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "AssumedRole",
+        "principalId": "AROAEXAMPLE:github-actions-deploy/run-4242",
+        "arn": "arn:aws:sts::123456789012:assumed-role/github-actions-deploy/run-4242",
+        "accountId": "123456789012",
+        "accessKeyId": "ASIAEXAMPLECIDEPLOY1"
+      },
+      "eventTime": "2026-11-05T09:00:00Z",
+      "eventSource": "sts.amazonaws.com",
+      "eventName": "GetCallerIdentity",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "198.51.100.20",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": null,
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000001",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "AssumedRole",
+        "principalId": "AROAEXAMPLE:github-actions-deploy/run-4242",
+        "arn": "arn:aws:sts::123456789012:assumed-role/github-actions-deploy/run-4242",
+        "accountId": "123456789012",
+        "accessKeyId": "ASIAEXAMPLECIDEPLOY1"
+      },
+      "eventTime": "2026-11-05T09:00:05Z",
+      "eventSource": "cloudformation.amazonaws.com",
+      "eventName": "DescribeStacks",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "198.51.100.20",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": null,
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000002",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "AssumedRole",
+        "principalId": "AROAEXAMPLE:github-actions-deploy/run-4242",
+        "arn": "arn:aws:sts::123456789012:assumed-role/github-actions-deploy/run-4242",
+        "accountId": "123456789012",
+        "accessKeyId": "ASIAEXAMPLECIDEPLOY1"
+      },
+      "eventTime": "2026-11-05T09:00:20Z",
+      "eventSource": "cloudformation.amazonaws.com",
+      "eventName": "UpdateStack",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "198.51.100.20",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": {
+        "stackName": "web-prod"
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000003",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "AssumedRole",
+        "principalId": "AROAEXAMPLE:github-actions-deploy/run-4242",
+        "arn": "arn:aws:sts::123456789012:assumed-role/github-actions-deploy/run-4242",
+        "accountId": "123456789012",
+        "accessKeyId": "ASIAEXAMPLECIDEPLOY1"
+      },
+      "eventTime": "2026-11-05T09:02:00Z",
+      "eventSource": "ec2.amazonaws.com",
+      "eventName": "RunInstances",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "198.51.100.20",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": {
+        "instancesSet": {
+          "items": [
+            {
+              "imageId": "ami-0example",
+              "minCount": 2,
+              "maxCount": 2
+            }
+          ]
+        },
+        "instanceType": "m6i.large"
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000004",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "AssumedRole",
+        "principalId": "AROAEXAMPLE:github-actions-deploy/run-4242",
+        "arn": "arn:aws:sts::123456789012:assumed-role/github-actions-deploy/run-4242",
+        "accountId": "123456789012",
+        "accessKeyId": "ASIAEXAMPLECIDEPLOY1"
+      },
+      "eventTime": "2026-11-05T09:02:30Z",
+      "eventSource": "ec2.amazonaws.com",
+      "eventName": "DescribeInstances",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "198.51.100.20",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": null,
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000005",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "AssumedRole",
+        "principalId": "AROAEXAMPLE:github-actions-deploy/run-4242",
+        "arn": "arn:aws:sts::123456789012:assumed-role/github-actions-deploy/run-4242",
+        "accountId": "123456789012",
+        "accessKeyId": "ASIAEXAMPLECIDEPLOY1"
+      },
+      "eventTime": "2026-11-05T09:03:00Z",
+      "eventSource": "iam.amazonaws.com",
+      "eventName": "PassRole",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "198.51.100.20",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": null,
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000006",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    }
+  ]
+}

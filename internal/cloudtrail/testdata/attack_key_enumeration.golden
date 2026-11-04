@@ -1,0 +1,162 @@
+{
+  "events": [
+    {
+      "time": "2026-11-12T22:00:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000001",
+      "service": "sts",
+      "action": "GetCallerIdentity",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/old-contractor",
+      "access_key_id": "AKIA************NTR1",
+      "source_ip": "203.0.113.5",
+      "user_agent": "Boto3/1.34.0"
+    },
+    {
+      "time": "2026-11-12T22:01:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000002",
+      "service": "iam",
+      "action": "ListRoles",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/old-contractor",
+      "access_key_id": "AKIA************NTR1",
+      "source_ip": "203.0.113.5",
+      "user_agent": "Boto3/1.34.0",
+      "error_code": "AccessDenied",
+      "indicators": [
+        "access_denied"
+      ]
+    },
+    {
+      "time": "2026-11-12T22:01:01Z",
+      "event_id": "00000000-0000-0000-0000-000000000003",
+      "service": "s3",
+      "action": "ListBuckets",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/old-contractor",
+      "access_key_id": "AKIA************NTR1",
+      "source_ip": "203.0.113.5",
+      "user_agent": "Boto3/1.34.0",
+      "error_code": "AccessDenied",
+      "indicators": [
+        "access_denied"
+      ]
+    },
+    {
+      "time": "2026-11-12T22:01:02Z",
+      "event_id": "00000000-0000-0000-0000-000000000004",
+      "service": "ec2",
+      "action": "DescribeInstances",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/old-contractor",
+      "access_key_id": "AKIA************NTR1",
+      "source_ip": "203.0.113.5",
+      "user_agent": "Boto3/1.34.0",
+      "error_code": "AccessDenied",
+      "indicators": [
+        "access_denied"
+      ]
+    },
+    {
+      "time": "2026-11-12T22:01:03Z",
+      "event_id": "00000000-0000-0000-0000-000000000005",
+      "service": "bedrock",
+      "action": "ListFoundationModels",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/old-contractor",
+      "access_key_id": "AKIA************NTR1",
+      "source_ip": "203.0.113.5",
+      "user_agent": "Boto3/1.34.0",
+      "error_code": "AccessDenied",
+      "indicators": [
+        "access_denied"
+      ]
+    },
+    {
+      "time": "2026-11-12T22:01:04Z",
+      "event_id": "00000000-0000-0000-0000-000000000006",
+      "service": "organizations",
+      "action": "DescribeOrganization",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/old-contractor",
+      "access_key_id": "AKIA************NTR1",
+      "source_ip": "203.0.113.5",
+      "user_agent": "Boto3/1.34.0",
+      "error_code": "AccessDenied",
+      "indicators": [
+        "access_denied"
+      ]
+    },
+    {
+      "time": "2026-11-12T22:01:05Z",
+      "event_id": "00000000-0000-0000-0000-000000000007",
+      "service": "sts",
+      "action": "GetSessionToken",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/old-contractor",
+      "access_key_id": "AKIA************NTR1",
+      "source_ip": "203.0.113.5",
+      "user_agent": "Boto3/1.34.0",
+      "error_code": "AccessDenied",
+      "indicators": [
+        "access_denied"
+      ]
+    },
+    {
+      "time": "2026-11-12T22:01:06Z",
+      "event_id": "00000000-0000-0000-0000-000000000008",
+      "service": "ce",
+      "action": "GetCostAndUsage",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/old-contractor",
+      "access_key_id": "AKIA************NTR1",
+      "source_ip": "203.0.113.5",
+      "user_agent": "Boto3/1.34.0",
+      "error_code": "AccessDenied",
+      "indicators": [
+        "access_denied"
+      ]
+    },
+    {
+      "time": "2026-11-12T22:01:07Z",
+      "event_id": "00000000-0000-0000-0000-000000000009",
+      "service": "sns",
+      "action": "ListTopics",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/old-contractor",
+      "access_key_id": "AKIA************NTR1",
+      "source_ip": "203.0.113.5",
+      "user_agent": "Boto3/1.34.0",
+      "error_code": "AccessDenied",
+      "indicators": [
+        "access_denied"
+      ]
+    }
+  ],
+  "summary": {
+    "events": 9,
+    "events_with_indicators": 8,
+    "first_event_time": "2026-11-12T22:00:00Z",
+    "last_event_time": "2026-11-12T22:01:07Z",
+    "by_indicator": {
+      "access_denied": 8
+    }
+  }
+}

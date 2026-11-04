@@ -34,6 +34,10 @@ const DefaultWindow = time.Hour
 // finding at or above which the enumeration_burst contributor applies.
 const EnumerationBurstThreshold = 5
 
+// MultiRegionGPUThreshold is the number of distinct regions with GPU launches
+// in one finding at or above which multi_region_gpu_launch applies.
+const MultiRegionGPUThreshold = 3
+
 // IndicatorWeights is the evidence weight (0 < w < 1) of each indicator.
 // Weights reflect how specific a signal is to abuse, not how severe the action is.
 var IndicatorWeights = map[cloudtrail.Indicator]float64{
@@ -87,8 +91,18 @@ var ChainRules = []ChainRule{
 	},
 }
 
-// enumerationBurstWeight applies when a finding has many access-denied events.
-const enumerationBurstWeight = 0.25
+// Weights for the count-based rules. Tuned against the replay fixtures in
+// internal/cloudtrail/testdata; see TestFixtureBands before changing them.
+const (
+	// enumerationBurstWeight applies when a finding has many access-denied
+	// events. Ordinary permission trial and error produces a few denials;
+	// a burst across services is typical of probing with stolen keys.
+	enumerationBurstWeight = 0.45
+	// multiRegionGPUWeight applies when GPU instances are launched in several
+	// regions at once, which separates miners spreading across regions from
+	// a training job in one region.
+	multiRegionGPUWeight = 0.40
+)
 
 // Options tune correlation.
 type Options struct {
@@ -202,6 +216,7 @@ func score(principal string, evs []cloudtrail.Event) Finding {
 	}
 	accounts, ips, regions := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	eventsFor := map[cloudtrail.Indicator][]string{}
+	gpuRegions := map[string]bool{}
 	for _, ev := range evs {
 		if ev.AccountID != "" {
 			accounts[ev.AccountID] = true
@@ -215,6 +230,9 @@ func score(principal string, evs []cloudtrail.Event) Finding {
 		for _, ind := range ev.Indicators {
 			f.Indicators[ind]++
 			eventsFor[ind] = append(eventsFor[ind], ev.EventID)
+			if ind == cloudtrail.GPUInstanceLaunch && ev.Region != "" {
+				gpuRegions[ev.Region] = true
+			}
 		}
 	}
 	f.AccountIDs, f.SourceIPs, f.Regions = sortedKeys(accounts), sortedKeys(ips), sortedKeys(regions)
@@ -232,6 +250,9 @@ func score(principal string, evs []cloudtrail.Event) Finding {
 	}
 	if n := f.Indicators[cloudtrail.AccessDenied]; n >= EnumerationBurstThreshold {
 		f.Contributors = append(f.Contributors, Contributor{Kind: "chain", Name: "enumeration_burst", Weight: enumerationBurstWeight, EventIDs: eventsFor[cloudtrail.AccessDenied]})
+	}
+	if len(gpuRegions) >= MultiRegionGPUThreshold {
+		f.Contributors = append(f.Contributors, Contributor{Kind: "chain", Name: "multi_region_gpu_launch", Weight: multiRegionGPUWeight, EventIDs: eventsFor[cloudtrail.GPUInstanceLaunch]})
 	}
 	for _, rule := range ChainRules {
 		var ids []string

@@ -1,0 +1,61 @@
+{
+  "events": [
+    {
+      "time": "2026-11-09T08:00:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000001",
+      "service": "servicequotas",
+      "action": "RequestServiceQuotaIncrease",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/ml-platform",
+      "access_key_id": "AKIA************TFM1",
+      "source_ip": "192.0.2.10",
+      "user_agent": "aws-cli/2.15.0",
+      "indicators": [
+        "quota_increase_request"
+      ]
+    },
+    {
+      "time": "2026-11-09T08:45:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000002",
+      "service": "ec2",
+      "action": "RunInstances",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/ml-platform",
+      "access_key_id": "AKIA************TFM1",
+      "source_ip": "192.0.2.10",
+      "user_agent": "aws-cli/2.15.0",
+      "instance_type": "p4d.24xlarge",
+      "instance_count": 4,
+      "indicators": [
+        "gpu_instance_launch"
+      ]
+    },
+    {
+      "time": "2026-11-09T08:46:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000003",
+      "service": "ec2",
+      "action": "CreateTags",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/ml-platform",
+      "access_key_id": "AKIA************TFM1",
+      "source_ip": "192.0.2.10",
+      "user_agent": "aws-cli/2.15.0"
+    }
+  ],
+  "summary": {
+    "events": 3,
+    "events_with_indicators": 2,
+    "first_event_time": "2026-11-09T08:00:00Z",
+    "last_event_time": "2026-11-09T08:46:00Z",
+    "by_indicator": {
+      "gpu_instance_launch": 1,
+      "quota_increase_request": 1
+    }
+  }
+}

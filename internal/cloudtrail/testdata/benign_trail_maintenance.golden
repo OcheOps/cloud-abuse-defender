@@ -1,0 +1,71 @@
+{
+  "events": [
+    {
+      "time": "2026-11-07T11:00:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000001",
+      "service": "cloudtrail",
+      "action": "DescribeTrails",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/security-engineer",
+      "access_key_id": "AKIA************GNR1",
+      "source_ip": "192.0.2.10",
+      "user_agent": "aws-cli/2.15.0"
+    },
+    {
+      "time": "2026-11-07T11:02:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000002",
+      "service": "cloudtrail",
+      "action": "PutEventSelectors",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/security-engineer",
+      "access_key_id": "AKIA************GNR1",
+      "source_ip": "192.0.2.10",
+      "user_agent": "aws-cli/2.15.0",
+      "indicators": [
+        "monitoring_tampering"
+      ]
+    },
+    {
+      "time": "2026-11-07T11:03:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000003",
+      "service": "cloudtrail",
+      "action": "UpdateTrail",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/security-engineer",
+      "access_key_id": "AKIA************GNR1",
+      "source_ip": "192.0.2.10",
+      "user_agent": "aws-cli/2.15.0",
+      "indicators": [
+        "monitoring_tampering"
+      ]
+    },
+    {
+      "time": "2026-11-07T11:04:00Z",
+      "event_id": "00000000-0000-0000-0000-000000000004",
+      "service": "cloudtrail",
+      "action": "GetTrailStatus",
+      "region": "us-east-1",
+      "account_id": "123456789012",
+      "principal_type": "IAMUser",
+      "principal_arn": "arn:aws:iam::123456789012:user/security-engineer",
+      "access_key_id": "AKIA************GNR1",
+      "source_ip": "192.0.2.10",
+      "user_agent": "aws-cli/2.15.0"
+    }
+  ],
+  "summary": {
+    "events": 4,
+    "events_with_indicators": 2,
+    "first_event_time": "2026-11-07T11:00:00Z",
+    "last_event_time": "2026-11-07T11:04:00Z",
+    "by_indicator": {
+      "monitoring_tampering": 2
+    }
+  }
+}
