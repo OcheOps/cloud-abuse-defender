@@ -24,7 +24,7 @@ See [architecture](docs/architecture.md) and [threat model](docs/threat-model.md
 
 Initial components:
 1. Telemetry adapters: **AWS CloudTrail log replay (implemented, offline)**; Bedrock metrics ingestion, host agent and Kubernetes events planned.
-2. Normalizer and detector (planned): event aggregation, anomaly detection, cryptominer indicators.
+2. **Detector (implemented)**: correlates CloudTrail indicators per principal into scored, explainable findings. Anomaly baselines and host cryptominer indicators are planned.
 3. **Policy engine (implemented)**: pure Go spending projection + risk gate.
    **Bedrock cost estimator (implemented)**: prices observed token usage with a versioned pricing table and flags unreliable forecasts.
 4. Response orchestration (planned): notifications, approval workflows, reversible scoped containment.
@@ -80,12 +80,30 @@ This reads a CloudTrail log file in the S3 delivery format (`{"Records": [...]}`
 
 Indicators are signals for a future detector to weigh, not verdicts: each one alone is often legitimate. Replay fixtures live in `internal/cloudtrail/testdata/`. Each `*.json` log has a `.golden` file holding the expected output; after an intended change, regenerate them with `go test ./internal/cloudtrail -update`.
 
+### Detect and decide end to end
+
+```sh
+go run ./cmd/cad detect -file internal/cloudtrail/testdata/incident.json \
+  -usage examples/usage.example.json -pricing examples/pricing.example.json -allow-containment
+```
+
+`cad detect` groups a CloudTrail log's indicator events by principal, starting a new finding wherever a principal goes quiet for longer than `-window` (default 1h). Each finding gets a confidence from a noisy-OR over its evidence, `100 × (1 − Π(1 − wᵢ))`:
+
+- each **distinct** indicator adds its weight once, so repeating it doesn't stack (weights are in `internal/detect`);
+- attack chains add weight when signals appear together: `cryptojacking_chain` (GPU launch + quota increase or bulk launch), `llmjacking_chain` (Bedrock logging removed + model-access change) and `evasion_with_resource_abuse` (CloudTrail/GuardDuty tampering + GPU, bulk or Bedrock activity);
+- `enumeration_burst` applies at 5 or more access-denied events.
+
+Every contributor is listed with its weight and the event IDs behind it. With a cost source (`-usage`/`-pricing`, or an explicit `-hourly-rate`), each finding also gets a policy `decision`; without one, only findings are printed. On the sample incident the `ci-deploy` user scores 98.6 and is eligible for containment, while the separate root activity scores 36 and stays alert-only.
+
+The weights are starting estimates, not tuned on real incidents: review them against your own environment before relying on the scores.
+
 ## Roadmap
 
 - [x] Initial Go module and tested policy evaluator
 - [x] Safe CLI simulation
 - [x] AWS Bedrock token-cost estimation and pricing-version tracking (offline; CloudWatch metrics ingestion still planned)
 - [x] CloudTrail adapter with event replay tests (offline log files; S3/EventBridge ingestion still planned)
+- [x] Indicator correlation and confidence scoring (CloudTrail)
 - [ ] Slack/webhook alert integration
 - [ ] Host runtime cryptojacking indicators
 - [ ] Kubernetes integration
