@@ -9,6 +9,8 @@
 //	cad bedrock-queries -models a,b  write CloudWatch queries for Bedrock token metrics
 //	cad bedrock-usage -results <f>   convert "aws cloudwatch get-metric-data" output to a usage file
 //	cad evidence-verify -file <log>  verify a tamper-evident evidence log
+//	cad approvals -evidence-log <f>  show each incident's containment approval state
+//	cad approve|reject|revoke ...    record an operator decision (never executes anything)
 //
 // The hourly spend comes either from -hourly-rate, or from a Bedrock usage
 // observation priced with a versioned table (-usage and -pricing).
@@ -22,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/user"
 	"strings"
 	"time"
 
@@ -31,6 +34,7 @@ import (
 	"github.com/OcheOps/cloud-abuse-defender/internal/cost"
 	"github.com/OcheOps/cloud-abuse-defender/internal/detect"
 	"github.com/OcheOps/cloud-abuse-defender/internal/evidence"
+	"github.com/OcheOps/cloud-abuse-defender/internal/incident"
 	"github.com/OcheOps/cloud-abuse-defender/internal/policy"
 )
 
@@ -51,6 +55,10 @@ func run(args []string, stdout, stderr io.Writer, now time.Time) int {
 			return runBedrockUsage(args[1:], stdout, stderr)
 		case "evidence-verify":
 			return runEvidenceVerify(args[1:], stdout, stderr)
+		case "approvals":
+			return runApprovals(args[1:], stdout, stderr, now)
+		case "approve", "reject", "revoke":
+			return runDecision(args[0], args[1:], stdout, stderr, now)
 		}
 	}
 	return runPolicy(args, stdout, stderr, now)
@@ -226,28 +234,6 @@ type detectOutput struct {
 	EvidenceHead *evidence.Head `json:"evidence_head,omitempty"`
 }
 
-// findingEvidence is the evidence-log record for one finding: everything
-// needed to explain the decision later, including the versions that made it.
-type findingEvidence struct {
-	Finding          detect.Finding   `json:"finding"`
-	Decision         *policy.Decision `json:"decision,omitempty"`
-	PricingVersion   string           `json:"pricing_version,omitempty"`
-	HourlyCostUSD    float64          `json:"hourly_cost_usd,omitempty"`
-	ForecastWarnings []string         `json:"forecast_warnings,omitempty"`
-	PolicyVersion    string           `json:"policy_version"`
-	WeightsVersion   string           `json:"weights_version"`
-}
-
-// notificationEvidence records a delivery attempt. The webhook URL is never recorded.
-type notificationEvidence struct {
-	Format  alert.Format  `json:"format"`
-	Status  string        `json:"status"`
-	Verdict alert.Verdict `json:"verdict,omitempty"`
-	Error   string        `json:"error,omitempty"`
-	// FindingRecord is the hash of the finding record this notification is about.
-	FindingRecord string `json:"finding_record,omitempty"`
-}
-
 func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
 	fs := flag.NewFlagSet("cad detect", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -349,11 +335,11 @@ func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
 		}
 		defer evLog.Close()
 		for i, df := range out.Findings {
-			ev := findingEvidence{Finding: df.Finding, Decision: df.Decision, PolicyVersion: policy.Version, WeightsVersion: detect.WeightsVersion}
+			ev := incident.FindingData{Finding: df.Finding, Decision: df.Decision, PolicyVersion: policy.Version, WeightsVersion: detect.WeightsVersion}
 			if est != nil {
 				ev.PricingVersion, ev.HourlyCostUSD, ev.ForecastWarnings = est.PricingVersion, est.HourlyCostUSD, est.Warnings
 			}
-			rec, err := evLog.Append("finding", df.IncidentID, ev, now)
+			rec, err := evLog.Append(incident.KindFinding, df.IncidentID, ev, now)
 			if err != nil {
 				fmt.Fprintln(stderr, err)
 				return 1
@@ -414,8 +400,8 @@ func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
 			out.Notifications = append(out.Notifications, n)
 			// Dry runs and skipped findings deliver nothing, so there is nothing to record.
 			if evLog != nil && (n.Status == "sent" || n.Status == "failed" || n.Status == "suppressed_duplicate") {
-				ne := notificationEvidence{Format: sender.Format, Status: n.Status, Verdict: n.Verdict, Error: n.Error, FindingRecord: recordHash[i]}
-				if _, err := evLog.Append("notification", df.IncidentID, ne, now); err != nil {
+				ne := incident.NotificationData{Format: sender.Format, Status: n.Status, Verdict: n.Verdict, Error: n.Error, FindingRecord: recordHash[i]}
+				if _, err := evLog.Append(incident.KindNotification, df.IncidentID, ne, now); err != nil {
 					fmt.Fprintln(stderr, err)
 					code = 1
 				}
@@ -441,6 +427,130 @@ func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
 		fmt.Fprintln(stderr, "one or more alerts could not be delivered")
 	}
 	return code
+}
+
+func runApprovals(args []string, stdout, stderr io.Writer, now time.Time) int {
+	fs := flag.NewFlagSet("cad approvals", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	path := fs.String("evidence-log", "", "evidence log written by 'cad detect -evidence-log'; required")
+	id := fs.String("incident", "", "show only this incident")
+	if _, ok := parseFlags(fs, args, stderr); !ok {
+		return 2
+	}
+	if *path == "" {
+		fmt.Fprintln(stderr, "-evidence-log is required")
+		return 2
+	}
+	records, _, err := evidence.ReadFile(*path)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if *id != "" {
+		s, err := incident.StatusOf(records, *id, now)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		return encode(stdout, stderr, s)
+	}
+	all, err := incident.Summarize(records, now)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	return encode(stdout, stderr, all)
+}
+
+// localAccount is the OS account running the command, recorded next to the
+// self-declared operator name.
+var localAccount = func() string {
+	if u, err := user.Current(); err == nil {
+		return u.Username
+	}
+	return ""
+}
+
+type decisionOutput struct {
+	Record evidence.Record `json:"record"`
+	Status incident.Status `json:"status"`
+}
+
+// runDecision records an approval, rejection or revocation. Nothing is executed.
+func runDecision(kind string, args []string, stdout, stderr io.Writer, now time.Time) int {
+	fs := flag.NewFlagSet("cad "+kind, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	path := fs.String("evidence-log", "", "evidence log written by 'cad detect -evidence-log'; required")
+	id := fs.String("incident", "", "incident ID; required")
+	operator := fs.String("operator", "", "name of the operator making the decision; required")
+	reason := fs.String("reason", "", "why; required")
+	var principal, action *string
+	var ttl *time.Duration
+	if kind == "approve" {
+		principal = fs.String("principal", "", "the incident's principal ARN, typed out to confirm the target; required")
+		action = fs.String("action", "", "reversible action to authorise: deactivate-access-keys or attach-deny-all-policy; required")
+		ttl = fs.Duration("expires", 0, "how long the approval stays valid (at most 24h); required")
+	}
+	if _, ok := parseFlags(fs, args, stderr); !ok {
+		return 2
+	}
+	if *path == "" || *id == "" {
+		fmt.Fprintln(stderr, "-evidence-log and -incident are required")
+		return 2
+	}
+	records, head, err := evidence.ReadFile(*path)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	d := incident.Decider{Operator: *operator, RecordedBy: localAccount(), Reason: *reason}
+
+	var recordKind string
+	var data any
+	switch kind {
+	case "approve":
+		act, perr := incident.ParseAction(*action)
+		if perr != nil {
+			fmt.Fprintln(stderr, perr)
+			return 2
+		}
+		recordKind = incident.KindApproval
+		data, err = incident.Approve(records, incident.ApproveRequest{Decider: d, IncidentID: *id, Principal: *principal, Action: act, TTL: *ttl}, now)
+	case "reject":
+		recordKind = incident.KindRejection
+		data, err = incident.Reject(records, *id, d, now)
+	default:
+		recordKind = incident.KindRevocation
+		data, err = incident.Revoke(records, *id, d, now)
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+
+	log, err := evidence.Open(*path)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	defer log.Close()
+	// The decision was validated against the log as read above; refuse if
+	// another writer appended in between.
+	if log.Head() != head {
+		fmt.Fprintln(stderr, "evidence log changed while the decision was being checked; run the command again")
+		return 1
+	}
+	rec, err := log.Append(recordKind, *id, data, now)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	status, err := incident.StatusOf(append(records, rec), *id, now)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	return encode(stdout, stderr, decisionOutput{Record: rec, Status: status})
 }
 
 func runEvidenceVerify(args []string, stdout, stderr io.Writer) int {
