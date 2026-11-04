@@ -17,6 +17,7 @@ import (
 	"github.com/OcheOps/cloud-abuse-defender/internal/cost"
 	"github.com/OcheOps/cloud-abuse-defender/internal/detect"
 	"github.com/OcheOps/cloud-abuse-defender/internal/evidence"
+	"github.com/OcheOps/cloud-abuse-defender/internal/incident"
 	"github.com/OcheOps/cloud-abuse-defender/internal/policy"
 )
 
@@ -631,7 +632,7 @@ func TestRunDetectEvidenceLog(t *testing.T) {
 	if recs[0].Kind != "finding" || recs[2].Kind != "notification" || recs[0].IncidentID != got.Findings[0].IncidentID {
 		t.Fatalf("unexpected records: %+v", recs)
 	}
-	var fe findingEvidence
+	var fe incident.FindingData
 	if err := json.Unmarshal(recs[0].Data, &fe); err != nil {
 		t.Fatal(err)
 	}
@@ -639,7 +640,7 @@ func TestRunDetectEvidenceLog(t *testing.T) {
 		fe.Decision == nil || len(fe.Finding.Contributors) == 0 {
 		t.Fatalf("finding record incomplete: %+v", fe)
 	}
-	var ne notificationEvidence
+	var ne incident.NotificationData
 	if err := json.Unmarshal(recs[2].Data, &ne); err != nil {
 		t.Fatal(err)
 	}
@@ -714,5 +715,147 @@ func TestRunEvidenceVerifyFailures(t *testing.T) {
 				t.Fatalf("exit %d (want %d), stderr %q, want %q", code, tc.code, stderr, tc.want)
 			}
 		})
+	}
+}
+
+// approvalLog runs detection with a cost source so the top finding is
+// containment eligible, and returns the log path and both incident IDs.
+func approvalLog(t *testing.T) (string, string, string) {
+	t.Helper()
+	logPath := filepath.Join(t.TempDir(), "evidence.jsonl")
+	got, code, stderr := runDetectCmd(t, "-file", incidentLog, "-evidence-log", logPath,
+		"-usage", exampleUsage, "-pricing", examplePricing, "-allow-containment")
+	if code != 0 {
+		t.Fatalf("setup: exit %d %s", code, stderr)
+	}
+	return logPath, got.Findings[0].IncidentID, got.Findings[1].IncidentID
+}
+
+const ciDeploy = "arn:aws:iam::123456789012:user/ci-deploy"
+
+func decide(t *testing.T, args ...string) (decisionOutput, int, string) {
+	t.Helper()
+	out, code, stderr := runCmd(t, args...)
+	var d decisionOutput
+	if code == 0 {
+		if err := json.Unmarshal([]byte(out), &d); err != nil {
+			t.Fatalf("invalid JSON %q: %v", out, err)
+		}
+	}
+	return d, code, stderr
+}
+
+func TestRunApprovalWorkflow(t *testing.T) {
+	old := localAccount
+	localAccount = func() string { return "test-account" }
+	t.Cleanup(func() { localAccount = old })
+	logPath, top, root := approvalLog(t)
+
+	out, code, stderr := runCmd(t, "approvals", "-evidence-log", logPath)
+	var all []incident.Status
+	if code != 0 || json.Unmarshal([]byte(out), &all) != nil || len(all) != 2 {
+		t.Fatalf("approvals list: %d %s %s", code, out, stderr)
+	}
+	states := map[string]incident.State{}
+	for _, s := range all {
+		states[s.IncidentID] = s.State
+	}
+	if states[top] != incident.StatePending || states[root] != incident.StateNotEligible {
+		t.Fatalf("unexpected states: %v", states)
+	}
+
+	d, code, stderr := decide(t, "approve", "-evidence-log", logPath, "-incident", top, "-principal", ciDeploy,
+		"-action", "deactivate-access-keys", "-expires", "4h", "-operator", "alice", "-reason", "confirmed stolen key")
+	if code != 0 || d.Status.State != incident.StateApproved || d.Record.Kind != incident.KindApproval {
+		t.Fatalf("approve: exit %d %+v %s", code, d, stderr)
+	}
+	if d.Status.Approval.RecordedBy != "test-account" || !d.Status.Approval.ExpiresAt.Equal(now.Add(4*time.Hour)) {
+		t.Fatalf("approval details: %+v", d.Status.Approval)
+	}
+
+	if _, code, stderr := decide(t, "approve", "-evidence-log", logPath, "-incident", top, "-principal", ciDeploy,
+		"-action", "deactivate-access-keys", "-expires", "4h", "-operator", "bob", "-reason", "again"); code != 1 || !strings.Contains(stderr, "already approved") {
+		t.Fatalf("double approval: %d %s", code, stderr)
+	}
+
+	d, code, stderr = decide(t, "revoke", "-evidence-log", logPath, "-incident", top, "-operator", "alice", "-reason", "key rotated instead")
+	if code != 0 || d.Status.State != incident.StateRevoked {
+		t.Fatalf("revoke: %d %+v %s", code, d, stderr)
+	}
+	d, code, stderr = decide(t, "reject", "-evidence-log", logPath, "-incident", top, "-operator", "alice", "-reason", "false positive")
+	if code != 0 || d.Status.State != incident.StateRejected {
+		t.Fatalf("reject: %d %+v %s", code, d, stderr)
+	}
+
+	out, code, _ = runCmd(t, "approvals", "-evidence-log", logPath, "-incident", top)
+	var one incident.Status
+	if code != 0 || json.Unmarshal([]byte(out), &one) != nil || one.State != incident.StateRejected {
+		t.Fatalf("single status: %d %s", code, out)
+	}
+	// Every decision is part of the verified chain.
+	if out, code, stderr := runCmd(t, "evidence-verify", "-file", logPath); code != 0 || !strings.Contains(out, `"records": 5`) {
+		t.Fatalf("verify after decisions: %d %s %s", code, out, stderr)
+	}
+}
+
+func TestRunDecisionRefusals(t *testing.T) {
+	logPath, top, root := approvalLog(t)
+	approve := func(extra ...string) []string {
+		base := map[string]string{"-evidence-log": logPath, "-incident": top, "-principal": ciDeploy,
+			"-action": "attach-deny-all-policy", "-expires": "1h", "-operator": "alice", "-reason": "r"}
+		for i := 0; i+1 < len(extra); i += 2 {
+			base[extra[i]] = extra[i+1]
+		}
+		args := []string{"approve"}
+		for k, v := range base {
+			if v != "" {
+				args = append(args, k, v)
+			}
+		}
+		return args
+	}
+	for name, tc := range map[string]struct {
+		args []string
+		code int
+		want string
+	}{
+		"wrong principal":             {approve("-principal", "arn:aws:iam::123456789012:root"), 1, "does not match"},
+		"not eligible":                {approve("-incident", root, "-principal", "arn:aws:iam::123456789012:root"), 1, "not containment eligible"},
+		"unknown incident":            {approve("-incident", "inc_nope"), 1, "no finding recorded"},
+		"destructive action":          {approve("-action", "delete-user"), 2, "unknown action"},
+		"expiry too long":             {approve("-expires", "48h"), 1, "at most 24h"},
+		"missing expiry":              {approve("-expires", ""), 1, "greater than 0"},
+		"missing reason":              {approve("-reason", ""), 1, "reason is required"},
+		"missing operator":            {approve("-operator", ""), 1, "operator is required"},
+		"missing log flag":            {[]string{"approve", "-incident", top}, 2, "are required"},
+		"missing log file":            {approve("-evidence-log", logPath+".nope"), 1, "does not exist"},
+		"revoke not approved":         {[]string{"revoke", "-evidence-log", logPath, "-incident", top, "-operator", "a", "-reason", "r"}, 1, "no active approval"},
+		"reject not eligible":         {[]string{"reject", "-evidence-log", logPath, "-incident", root, "-operator", "a", "-reason", "r"}, 1, "nothing to reject"},
+		"approve-only flag on reject": {[]string{"reject", "-evidence-log", logPath, "-incident", top, "-expires", "1h"}, 2, "flag provided but not defined"},
+		"approvals no log":            {[]string{"approvals"}, 2, "-evidence-log is required"},
+		"approvals bad log":           {[]string{"approvals", "-evidence-log", logPath + ".nope"}, 1, "does not exist"},
+		"approvals unknown":           {[]string{"approvals", "-evidence-log", logPath, "-incident", "inc_nope"}, 1, "no finding recorded"},
+		"approvals extra arg":         {[]string{"approvals", "-evidence-log", logPath, "x"}, 2, "unexpected arguments"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, code, stderr := runCmd(t, tc.args...)
+			if code != tc.code || !strings.Contains(stderr, tc.want) {
+				t.Fatalf("exit %d (want %d), stderr %q, want %q", code, tc.code, stderr, tc.want)
+			}
+		})
+	}
+	// Refusals append nothing.
+	if out, _, _ := runCmd(t, "evidence-verify", "-file", logPath); !strings.Contains(out, `"records": 2`) {
+		t.Fatalf("refused decisions must not be recorded: %s", out)
+	}
+}
+
+func TestRunDecisionRefusesTamperedLog(t *testing.T) {
+	logPath, top, _ := approvalLog(t)
+	raw, _ := os.ReadFile(logPath)
+	os.WriteFile(logPath, []byte(strings.Replace(string(raw), "ci-deploy", "ci-deplox", 1)), 0o600)
+	_, code, stderr := runCmd(t, "reject", "-evidence-log", logPath, "-incident", top, "-operator", "a", "-reason", "r")
+	if code != 1 || !strings.Contains(stderr, "hash mismatch") {
+		t.Fatalf("decision on tampered log: %d %s", code, stderr)
 	}
 }
