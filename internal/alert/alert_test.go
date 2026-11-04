@@ -250,3 +250,21 @@ func TestSendRejectsInvalidConfigWithoutRequest(t *testing.T) {
 		t.Fatalf("want ErrConfig, got %v", err)
 	}
 }
+
+func TestSlackTitleShowsUpdate(t *testing.T) {
+	for update, prefix := range map[string]string{"": "Cloud Abuse", "escalated": "Escalated: ", "reminder": "Reminder: "} {
+		a := FromFinding(finding(), nil, nil, t0)
+		a.Update = update
+		body, err := Render(FormatSlack, a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var msg slackPayload
+		if err := json.Unmarshal(body, &msg); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(msg.Text, prefix) {
+			t.Errorf("update %q: title %q, want prefix %q", update, msg.Text, prefix)
+		}
+	}
+}

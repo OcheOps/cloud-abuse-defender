@@ -140,7 +140,26 @@ CAD_WEBHOOK_URL='https://hooks.slack.com/services/...' go run ./cmd/cad detect -
 - 429 and 5xx responses are retried up to 3 times with backoff; other errors fail immediately.
 - If any delivery fails, findings are still printed, each notification's status is in the output, and the command exits 1.
 
-Alerts are informational: every message says no action has been taken and containment needs operator approval. There is no de-duplication yet, so replaying the same log sends the same alerts again.
+Alerts are informational: every message says no action has been taken and containment needs operator approval.
+
+#### De-duplication
+
+Add `-alert-state <file>` so repeated runs over the same or overlapping logs don't re-send alerts:
+
+```sh
+CAD_WEBHOOK_URL='https://hooks.slack.com/services/...' go run ./cmd/cad detect -file trail.json.gz -notify slack -alert-state cad-alert-state.json
+```
+
+A finding matches an earlier alert when it's the same principal and the time ranges overlap or are within `-window` of each other, so a longer replay of the same incident still matches. Each matching finding gets a `verdict`:
+
+| Verdict | When | Result |
+|---|---|---|
+| `new` | no earlier alert covers it | sent |
+| `escalated` | confidence rose, or the policy decision changed | sent, titled "Escalated:" |
+| `reminder` | unchanged, but the last send is older than `-alert-suppress-for` (default 24h) | sent, titled "Reminder:" |
+| `duplicate` | unchanged and recent | not sent (`suppressed_duplicate`) |
+
+Only delivered alerts are recorded, so a failed send is retried on the next run, and dry runs never write the file. The file is written atomically with `0600` permissions, keeps 30 days of history, and contains principal ARNs, so treat it as sensitive. A corrupt state file stops the run instead of being silently reset. It assumes one writer at a time: two runs sharing a file at once may both send.
 
 ## Roadmap
 
@@ -149,7 +168,7 @@ Alerts are informational: every message says no action has been taken and contai
 - [x] AWS Bedrock token-cost estimation and pricing-version tracking (offline; CloudWatch metrics ingestion still planned)
 - [x] CloudTrail adapter with event replay tests (offline log files; S3/EventBridge ingestion still planned)
 - [x] Indicator correlation and confidence scoring (CloudTrail)
-- [x] Slack/webhook alert integration (no de-duplication yet)
+- [x] Slack/webhook alert integration with de-duplication
 - [ ] Host runtime cryptojacking indicators
 - [ ] Kubernetes integration
 - [ ] Auditable approval and containment orchestration
