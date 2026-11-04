@@ -7,6 +7,11 @@ import (
 	"math"
 )
 
+// Version identifies the decision rules in Evaluate. Bump it whenever the
+// rules or reasons change, so recorded decisions can be traced to the logic
+// that made them.
+const Version = "policy-2026-11-04.1"
+
 // Action is the response the policy recommends.
 type Action string
 
