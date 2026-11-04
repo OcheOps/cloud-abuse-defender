@@ -23,7 +23,7 @@ Stolen cloud credentials and cryptojacking can turn a security incident into a h
 See [architecture](docs/architecture.md) and [threat model](docs/threat-model.md).
 
 Initial components:
-1. Telemetry adapters: **AWS CloudTrail log replay (implemented, offline)**; Bedrock metrics ingestion, host agent and Kubernetes events planned.
+1. Telemetry adapters: **AWS CloudTrail log replay and Bedrock CloudWatch metrics conversion (implemented, offline)**; host agent and Kubernetes events planned.
 2. **Detector (implemented)**: correlates CloudTrail indicators per principal into scored, explainable findings. Anomaly baselines and host cryptominer indicators are planned.
 3. **Policy engine (implemented)**: pure Go spending projection + risk gate.
    **Bedrock cost estimator (implemented)**: prices observed token usage with a versioned pricing table and flags unreliable forecasts.
@@ -55,6 +55,40 @@ The forecast is flagged as unreliable, and the decision drops to **alert-only**,
 - the pricing table is older than `-max-pricing-age` (default 30 days) or not yet in effect,
 - usage includes a model with no price in the table, or
 - the observation window is shorter than `-min-window` (default 15 minutes).
+
+#### Build the usage file from CloudWatch
+
+`cad` never calls AWS or touches credentials. Instead, it writes the queries, you fetch the metrics with your own AWS CLI, and `cad` converts the result:
+
+```sh
+# 1. Find the models with token metrics (or skip and pass -models a,b directly)
+aws cloudwatch list-metrics --namespace AWS/Bedrock --metric-name InputTokenCount --region us-east-1 > list-metrics.json
+go run ./cmd/cad bedrock-queries -list-metrics list-metrics.json > queries.json
+
+# 2. Fetch input/output token sums for the window
+aws cloudwatch get-metric-data --metric-data-queries file://queries.json \
+  --start-time 2026-11-04T10:00:00Z --end-time 2026-11-04T10:30:00Z --region us-east-1 > results.json
+
+# 3. Convert, using the same region and times
+go run ./cmd/cad bedrock-usage -results results.json -region us-east-1 \
+  -start 2026-11-04T10:00:00Z -end 2026-11-04T10:30:00Z > usage.json
+```
+
+`usage.json` then goes to `-usage` as above. The AWS identity only needs this read-only policy:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{ "Effect": "Allow", "Action": ["cloudwatch:GetMetricData", "cloudwatch:ListMetrics"], "Resource": "*" }]
+}
+```
+
+The conversion refuses to guess:
+- it rejects results whose `StatusCode` isn't `Complete`, because partial data would understate spend;
+- it rejects datapoints outside `-start`/`-end`, which catches times that don't match the AWS CLI call;
+- it rejects series it didn't label, since each query's `Label` (`cad:<metric>:<model>`) is how it knows which model a series belongs to.
+
+Paginated output with repeated series is summed. One query file covers up to 250 models.
 
 Usage in one region can't be priced with another region's table. Only on-demand token pricing is modelled; provisioned throughput, batch discounts and private pricing are not.
 
@@ -165,7 +199,8 @@ Only delivered alerts are recorded, so a failed send is retried on the next run,
 
 - [x] Initial Go module and tested policy evaluator
 - [x] Safe CLI simulation
-- [x] AWS Bedrock token-cost estimation and pricing-version tracking (offline; CloudWatch metrics ingestion still planned)
+- [x] AWS Bedrock token-cost estimation and pricing-version tracking
+- [x] Bedrock CloudWatch token metrics to usage conversion (via the AWS CLI; no direct API client)
 - [x] CloudTrail adapter with event replay tests (offline log files; S3/EventBridge ingestion still planned)
 - [x] Indicator correlation and confidence scoring (CloudTrail)
 - [x] Slack/webhook alert integration with de-duplication

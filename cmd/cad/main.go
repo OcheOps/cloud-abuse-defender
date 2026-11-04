@@ -6,6 +6,8 @@
 //	cad detect -file <log> [flags]   correlate a CloudTrail log into scored findings and,
 //	                                 given a cost source, a policy decision per finding;
 //	                                 -notify slack|webhook sends alerts to $CAD_WEBHOOK_URL
+//	cad bedrock-queries -models a,b  write CloudWatch queries for Bedrock token metrics
+//	cad bedrock-usage -results <f>   convert "aws cloudwatch get-metric-data" output to a usage file
 //
 // The hourly spend comes either from -hourly-rate, or from a Bedrock usage
 // observation priced with a versioned table (-usage and -pricing).
@@ -19,10 +21,12 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/OcheOps/cloud-abuse-defender/internal/alert"
 	"github.com/OcheOps/cloud-abuse-defender/internal/cloudtrail"
+	"github.com/OcheOps/cloud-abuse-defender/internal/cloudwatch"
 	"github.com/OcheOps/cloud-abuse-defender/internal/cost"
 	"github.com/OcheOps/cloud-abuse-defender/internal/detect"
 	"github.com/OcheOps/cloud-abuse-defender/internal/policy"
@@ -39,6 +43,10 @@ func run(args []string, stdout, stderr io.Writer, now time.Time) int {
 			return runCloudTrail(args[1:], stdout, stderr)
 		case "detect":
 			return runDetect(args[1:], stdout, stderr, now)
+		case "bedrock-queries":
+			return runBedrockQueries(args[1:], stdout, stderr)
+		case "bedrock-usage":
+			return runBedrockUsage(args[1:], stdout, stderr)
 		}
 	}
 	return runPolicy(args, stdout, stderr, now)
@@ -365,6 +373,71 @@ func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
 		fmt.Fprintln(stderr, "one or more alerts could not be delivered")
 	}
 	return code
+}
+
+func runBedrockQueries(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("cad bedrock-queries", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	models := fs.String("models", "", "comma-separated Bedrock model IDs")
+	listMetrics := fs.String("list-metrics", "", `output of "aws cloudwatch list-metrics --namespace AWS/Bedrock" to take model IDs from`)
+	period := fs.Int("period", cloudwatch.DefaultPeriod, "aggregation period in seconds (multiple of 60)")
+	if _, ok := parseFlags(fs, args, stderr); !ok {
+		return 2
+	}
+	var ids []string
+	switch {
+	case (*models == "") == (*listMetrics == ""):
+		fmt.Fprintln(stderr, "give exactly one of -models or -list-metrics")
+		return 2
+	case *models != "":
+		ids = strings.Split(*models, ",")
+	default:
+		var err error
+		if ids, err = loadFile(*listMetrics, cloudwatch.ModelsFromListMetrics); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+	}
+	queries, err := cloudwatch.BuildQueries(ids, *period)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	return encode(stdout, stderr, queries)
+}
+
+func runBedrockUsage(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("cad bedrock-usage", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	results := fs.String("results", "", `output of "aws cloudwatch get-metric-data" run with queries from "cad bedrock-queries"; required`)
+	region := fs.String("region", "", "AWS region the metrics were read from; required")
+	startStr := fs.String("start", "", "the --start-time given to the AWS CLI (RFC 3339); required")
+	endStr := fs.String("end", "", "the --end-time given to the AWS CLI (RFC 3339); required")
+	if _, ok := parseFlags(fs, args, stderr); !ok {
+		return 2
+	}
+	if *results == "" || *region == "" || *startStr == "" || *endStr == "" {
+		fmt.Fprintln(stderr, "-results, -region, -start and -end are required")
+		return 2
+	}
+	start, err := time.Parse(time.RFC3339, *startStr)
+	if err != nil {
+		fmt.Fprintf(stderr, "-start: %v\n", err)
+		return 2
+	}
+	end, err := time.Parse(time.RFC3339, *endStr)
+	if err != nil {
+		fmt.Fprintf(stderr, "-end: %v\n", err)
+		return 2
+	}
+	usage, err := loadFile(*results, func(r io.Reader) (cost.Usage, error) {
+		return cloudwatch.UsageFromResults(r, *region, start, end)
+	})
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	return encode(stdout, stderr, usage)
 }
 
 func encode(stdout, stderr io.Writer, v any) int {
