@@ -195,8 +195,12 @@ var httpClient = &http.Client{Timeout: 10 * time.Second}
 type notification struct {
 	Principal string    `json:"principal"`
 	First     time.Time `json:"first_event_time"`
-	// Status is "sent", "failed", "dry_run" or "skipped_below_threshold".
-	Status  string          `json:"status"`
+	// Status is "sent", "failed", "dry_run", "skipped_below_threshold" or
+	// "suppressed_duplicate".
+	Status string `json:"status"`
+	// Verdict is the de-duplication verdict ("new", "escalated", "reminder",
+	// "duplicate") when -alert-state is set.
+	Verdict alert.Verdict   `json:"verdict,omitempty"`
 	Error   string          `json:"error,omitempty"`
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
@@ -215,6 +219,8 @@ func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
 	notify := fs.String("notify", "", `send alerts as "slack" or "webhook" to $`+webhookEnv)
 	notifyMin := fs.Float64("notify-min-confidence", 50, "only alert on findings at or above this confidence")
 	dryRun := fs.Bool("notify-dry-run", false, "render alert payloads into the output instead of sending them")
+	statePath := fs.String("alert-state", "", "state file of delivered alerts; enables de-duplication (created if missing, never written on dry runs)")
+	suppressFor := fs.Duration("alert-suppress-for", 24*time.Hour, "with -alert-state, re-send an unchanged alert only after this long")
 	cf := registerCostFlags(fs)
 	set, ok := parseFlags(fs, args, stderr)
 	if !ok {
@@ -226,8 +232,14 @@ func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
 	}
 	var sender *alert.Sender
 	switch {
-	case *notify == "" && (*dryRun || set["notify-min-confidence"]):
-		fmt.Fprintln(stderr, "-notify-dry-run and -notify-min-confidence require -notify")
+	case *notify == "" && (*dryRun || set["notify-min-confidence"] || *statePath != "" || set["alert-suppress-for"]):
+		fmt.Fprintln(stderr, "-notify-dry-run, -notify-min-confidence, -alert-state and -alert-suppress-for require -notify")
+		return 2
+	case set["alert-suppress-for"] && *statePath == "":
+		fmt.Fprintln(stderr, "-alert-suppress-for requires -alert-state")
+		return 2
+	case *suppressFor < 0:
+		fmt.Fprintln(stderr, "-alert-suppress-for must not be negative")
 		return 2
 	case *notify != "":
 		format, err := alert.ParseFormat(*notify)
@@ -287,14 +299,31 @@ func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
 		out.Findings = append(out.Findings, df)
 	}
 
+	var state *alert.State
+	if sender != nil && *statePath != "" {
+		if state, err = alert.LoadState(*statePath); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+	}
+
 	code := 0
+	stateChanged := false
 	if sender != nil {
 		for _, df := range out.Findings {
 			n := notification{Principal: df.Principal, First: df.First}
 			a := alert.FromFinding(df.Finding, df.Decision, est, now)
+			if state != nil && df.Confidence >= *notifyMin {
+				n.Verdict = state.Check(a, *window, *suppressFor, now)
+				if n.Verdict == alert.VerdictEscalated || n.Verdict == alert.VerdictReminder {
+					a.Update = string(n.Verdict)
+				}
+			}
 			switch {
 			case df.Confidence < *notifyMin:
 				n.Status = "skipped_below_threshold"
+			case n.Verdict == alert.VerdictDuplicate:
+				n.Status = "suppressed_duplicate"
 			case *dryRun:
 				payload, err := alert.Render(sender.Format, a)
 				if err != nil {
@@ -311,9 +340,20 @@ func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
 					code = 1
 				} else {
 					n.Status = "sent"
+					// Only delivered alerts are recorded, so a failed send is retried next run.
+					if state != nil {
+						state.Record(a, *window, now)
+						stateChanged = true
+					}
 				}
 			}
 			out.Notifications = append(out.Notifications, n)
+		}
+	}
+	if stateChanged {
+		if err := state.Save(*statePath, now); err != nil {
+			fmt.Fprintln(stderr, err)
+			code = 1
 		}
 	}
 	// Findings are always printed; a failed delivery is reported in the
