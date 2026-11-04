@@ -239,13 +239,16 @@ Rules enforced:
 - `-principal` must repeat the incident's principal exactly, so a mistyped incident ID can't approve the wrong target.
 - Only reversible actions scoped to that principal are offered: `deactivate-access-keys` and `attach-deny-all-policy`.
 - Every decision needs an operator name and a reason, and approvals expire after `-expires`, at most 24h.
+- **Two-person rule:** an incident is `approved` only once enough *distinct* operators have approved the same action on the same finding; until then it is `partially_approved`. The number needed is fixed in the finding record at detection time with `cad detect -approvals-required` (default 2, range 1–5), so approvers can't lower it. A second approval is refused if it uses an operator name already in the round, or comes from an OS account already in the round.
+- The quorum expires with its **earliest** approval. An approval that arrives after that starts a fresh round rather than completing the old one.
+- **One operator can stop it:** any single operator can reject a pending or partially approved incident, or revoke an approval round, complete or not.
 - Decisions bind to one finding record. If a later run records a newer finding for the incident, it returns to `pending` for a fresh decision.
-- An active approval can't be approved again or rejected; revoke it first.
+- A complete approval can't be approved again or rejected; revoke it first.
 - Decisions are refused on a log that fails verification, or one that changed while the decision was being checked.
 
-`cad approvals` reports each incident as `not_eligible`, `pending`, `approved`, `rejected`, `expired` or `revoked`.
+`cad approvals` reports each incident as `not_eligible`, `pending`, `partially_approved`, `approved`, `rejected`, `expired` or `revoked`, with the required count and the approvals so far.
 
-Identity is **not authenticated**: `operator` is what was typed, and `recorded_by` is the local OS account that ran the command. Treat approvals as an audit trail of claims until an authenticated approval path exists. There's no two-person rule yet.
+Identity is **not authenticated**: `operator` is what was typed, and `recorded_by` is the local OS account that ran the command. The distinct-account check stops one person approving twice from the same login, but someone with two accounts, or write access to the log, could still satisfy the quorum alone. Treat approvals as an audit trail of claims until an authenticated approval path exists. `-approvals-required 1` turns the two-person rule off for single-operator teams; that choice is recorded in each finding.
 
 ## Roadmap
 

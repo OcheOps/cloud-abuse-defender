@@ -67,66 +67,169 @@ func approveReq(id string) ApproveRequest {
 	return ApproveRequest{Decider: op, IncidentID: id, Principal: principal, Action: DeactivateAccessKeys, TTL: 4 * time.Hour}
 }
 
-func TestLifecycle(t *testing.T) {
+func (h *harness) appendAt(kind, id string, data any, at time.Time) evidence.Record {
+	h.t.Helper()
+	r, err := h.log.Append(kind, id, data, at)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.recs = append(h.recs, r)
+	return r
+}
+
+func (h *harness) findingRequiring(id string, required int) evidence.Record {
+	return h.append(KindFinding, id, FindingData{
+		Finding:           detect.Finding{Principal: principal, Confidence: 95},
+		Decision:          &policy.Decision{Action: policy.RecommendContainment, EligibleForContainment: true},
+		ApprovalsRequired: required,
+	})
+}
+
+var bob = Decider{Operator: "bob", RecordedBy: "bob-laptop", Reason: "agree, key is stolen"}
+
+func (h *harness) approve(req ApproveRequest, at time.Time) evidence.Record {
+	h.t.Helper()
+	ap, err := Approve(h.recs, req, at)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return h.appendAt(KindApproval, req.IncidentID, ap, at)
+}
+
+func TestLifecycleTwoPersonRule(t *testing.T) {
 	h := newHarness(t)
 	f := h.finding("inc_a", true, 98.6)
-	if s := h.state("inc_a", t0); s.State != StatePending || s.FindingRecord != f.Hash {
-		t.Fatalf("want pending, got %+v", s)
+	if s := h.state("inc_a", t0); s.State != StatePending || s.FindingRecord != f.Hash || s.RequiredApprovals != 2 {
+		t.Fatalf("want pending needing 2, got %+v", s)
 	}
 
-	ap, err := Approve(h.recs, approveReq("inc_a"), t0)
+	first := h.approve(approveReq("inc_a"), t0)
+	if s := h.state("inc_a", t0); s.State != StatePartiallyApproved || len(s.Approvals) != 1 || s.Action != DeactivateAccessKeys {
+		t.Fatalf("one approval must be partial, got %+v", s)
+	}
+
+	// The same person, or the same OS account under another name, cannot complete the quorum.
+	if _, err := Approve(h.recs, approveReq("inc_a"), t0); !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "different operator") {
+		t.Fatalf("same operator: %v", err)
+	}
+	sameAccount := approveReq("inc_a")
+	sameAccount.Operator = "mallory"
+	if _, err := Approve(h.recs, sameAccount, t0); !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "another account") {
+		t.Fatalf("same OS account: %v", err)
+	}
+	otherAction := approveReq("inc_a")
+	otherAction.Decider, otherAction.Action = bob, AttachDenyAllPolicy
+	if _, err := Approve(h.recs, otherAction, t0); !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "approve that action") {
+		t.Fatalf("different action: %v", err)
+	}
+
+	second := approveReq("inc_a")
+	second.Decider, second.TTL = bob, time.Hour
+	secondRec := h.approve(second, t0.Add(10*time.Minute))
+	s := h.state("inc_a", t0.Add(20*time.Minute))
+	if s.State != StateApproved || len(s.Approvals) != 2 || s.ApprovalRecords[0] != first.Hash {
+		t.Fatalf("two distinct approvals must approve, got %+v", s)
+	}
+	// The quorum expires with its earliest approval: bob's 1h from t0+10m.
+	if !s.ExpiresAt.Equal(t0.Add(70 * time.Minute)) {
+		t.Fatalf("round expiry %v, want earliest approval's", s.ExpiresAt)
+	}
+	if st := h.state("inc_a", t0.Add(70*time.Minute)); st.State != StateExpired {
+		t.Fatalf("want expired at the earliest deadline, got %s", st.State)
+	}
+
+	third := approveReq("inc_a")
+	third.Decider = Decider{Operator: "carol", RecordedBy: "carol-laptop", Reason: "r"}
+	if _, err := Approve(h.recs, third, t0.Add(20*time.Minute)); !errors.Is(err, ErrRefused) {
+		t.Fatalf("approving an approved incident: %v", err)
+	}
+	if _, err := Reject(h.recs, "inc_a", op, t0.Add(20*time.Minute)); !errors.Is(err, ErrRefused) {
+		t.Fatalf("rejecting an approved incident must require revoking first: %v", err)
+	}
+
+	// One operator can revoke the whole round.
+	rv, err := Revoke(h.recs, "inc_a", op, t0.Add(20*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ap.FindingRecord != f.Hash || !ap.ExpiresAt.Equal(t0.Add(4*time.Hour)) || ap.Principal != principal {
-		t.Fatalf("unexpected approval: %+v", ap)
+	if rv.ApprovalRecord != secondRec.Hash {
+		t.Fatalf("revocation must reference the round: %+v", rv)
 	}
-	apRec := h.append(KindApproval, "inc_a", ap)
-	s := h.state("inc_a", t0.Add(time.Hour))
-	if s.State != StateApproved || s.DecisionRecord != apRec.Hash || s.Approval.Operator != "alice" {
-		t.Fatalf("want approved, got %+v", s)
+	h.appendAt(KindRevocation, "inc_a", rv, t0.Add(20*time.Minute))
+	if st := h.state("inc_a", t0.Add(20*time.Minute)); st.State != StateRevoked || len(st.Approvals) != 0 {
+		t.Fatalf("want revoked, got %+v", st)
 	}
-	if _, err := Approve(h.recs, approveReq("inc_a"), t0); !errors.Is(err, ErrRefused) {
-		t.Fatalf("double approval must be refused: %v", err)
-	}
-	if _, err := Reject(h.recs, "inc_a", op, t0); !errors.Is(err, ErrRefused) {
-		t.Fatalf("rejecting an active approval must be refused: %v", err)
-	}
-	if s := h.state("inc_a", t0.Add(4*time.Hour)); s.State != StateExpired {
-		t.Fatalf("want expired at the deadline, got %s", s.State)
+	if _, err := Revoke(h.recs, "inc_a", op, t0.Add(20*time.Minute)); !errors.Is(err, ErrRefused) {
+		t.Fatalf("revoking twice: %v", err)
 	}
 
-	rv, err := Revoke(h.recs, "inc_a", op, t0.Add(time.Hour))
+	// A new round after revocation; one operator can reject it while partial.
+	h.approve(approveReq("inc_a"), t0.Add(30*time.Minute))
+	if st := h.state("inc_a", t0.Add(30*time.Minute)); st.State != StatePartiallyApproved || len(st.Approvals) != 1 {
+		t.Fatalf("approval after revocation must start a new round: %+v", st)
+	}
+	rj, err := Reject(h.recs, "inc_a", bob, t0.Add(31*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rv.ApprovalRecord != apRec.Hash {
-		t.Fatalf("revocation must point at the approval: %+v", rv)
+	h.appendAt(KindRejection, "inc_a", rj, t0.Add(31*time.Minute))
+	if st := h.state("inc_a", t0.Add(31*time.Minute)); st.State != StateRejected || st.DecisionRecord == "" {
+		t.Fatalf("want rejected, got %+v", st)
 	}
-	h.append(KindRevocation, "inc_a", rv)
-	if s := h.state("inc_a", t0.Add(time.Hour)); s.State != StateRevoked {
-		t.Fatalf("want revoked, got %s", s.State)
-	}
-	if _, err := Revoke(h.recs, "inc_a", op, t0); !errors.Is(err, ErrRefused) {
-		t.Fatalf("revoking twice must be refused: %v", err)
+	if _, err := Approve(h.recs, second, t0.Add(32*time.Minute)); !errors.Is(err, ErrRefused) {
+		t.Fatalf("approving a rejected finding: %v", err)
 	}
 
-	rj, err := Reject(h.recs, "inc_a", op, t0.Add(time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	h.append(KindRejection, "inc_a", rj)
-	if s := h.state("inc_a", t0.Add(time.Hour)); s.State != StateRejected {
-		t.Fatalf("want rejected, got %s", s.State)
-	}
-	if _, err := Approve(h.recs, approveReq("inc_a"), t0); !errors.Is(err, ErrRefused) {
-		t.Fatalf("approving a rejected finding must be refused: %v", err)
-	}
-
-	// A newer finding needs a fresh decision.
+	// A newer finding needs fresh decisions.
 	f2 := h.finding("inc_a", true, 99)
-	if s := h.state("inc_a", t0); s.State != StatePending || s.FindingRecord != f2.Hash {
-		t.Fatalf("newer finding must reset to pending: %+v", s)
+	if st := h.state("inc_a", t0); st.State != StatePending || st.FindingRecord != f2.Hash {
+		t.Fatalf("newer finding must reset to pending: %+v", st)
+	}
+}
+
+func TestQuorumOfOne(t *testing.T) {
+	h := newHarness(t)
+	h.findingRequiring("inc_solo", 1)
+	h.approve(approveReq("inc_solo"), t0)
+	if s := h.state("inc_solo", t0); s.State != StateApproved || s.RequiredApprovals != 1 {
+		t.Fatalf("quorum of one must approve with one operator: %+v", s)
+	}
+}
+
+func TestQuorumOfThree(t *testing.T) {
+	h := newHarness(t)
+	h.findingRequiring("inc_3", 3)
+	h.approve(approveReq("inc_3"), t0)
+	r2 := approveReq("inc_3")
+	r2.Decider = bob
+	h.approve(r2, t0)
+	if s := h.state("inc_3", t0); s.State != StatePartiallyApproved {
+		t.Fatalf("two of three must stay partial: %s", s.State)
+	}
+	r3 := approveReq("inc_3")
+	r3.Decider = Decider{Operator: "carol", Reason: "r"} // no OS account recorded
+	h.approve(r3, t0)
+	if s := h.state("inc_3", t0); s.State != StateApproved || len(s.Approvals) != 3 {
+		t.Fatalf("three distinct operators must approve: %+v", s)
+	}
+}
+
+func TestPartialRoundExpires(t *testing.T) {
+	h := newHarness(t)
+	h.finding("inc_a", true, 90)
+	short := approveReq("inc_a")
+	short.TTL = time.Hour
+	h.approve(short, t0)
+	if s := h.state("inc_a", t0.Add(time.Hour)); s.State != StateExpired {
+		t.Fatalf("partial round must expire: %s", s.State)
+	}
+	// An approval after expiry starts a fresh round instead of completing the old one.
+	late := approveReq("inc_a")
+	late.Decider = bob
+	h.approve(late, t0.Add(2*time.Hour))
+	s := h.state("inc_a", t0.Add(2*time.Hour))
+	if s.State != StatePartiallyApproved || len(s.Approvals) != 1 || s.Approvals[0].Operator != "bob" {
+		t.Fatalf("late approval must not join an expired round: %+v", s)
 	}
 }
 
@@ -187,6 +290,9 @@ func TestRejectAndRevokeRefusals(t *testing.T) {
 		t.Fatalf("revoke unknown incident: %v", err)
 	}
 	h.append(KindRejection, "inc_ok", RejectionData{Decider: op, FindingRecord: h.recs[1].Hash})
+	if st := h.state("inc_ok", t0); st.State != StateRejected {
+		t.Fatalf("want rejected, got %s", st.State)
+	}
 	if _, err := Reject(h.recs, "inc_ok", op, t0); !errors.Is(err, ErrRefused) {
 		t.Fatalf("double rejection: %v", err)
 	}
@@ -211,7 +317,7 @@ func TestSummarize(t *testing.T) {
 }
 
 func TestMalformedRecords(t *testing.T) {
-	for _, kind := range []string{KindFinding, KindApproval, KindRevocation} {
+	for _, kind := range []string{KindFinding, KindApproval, KindRejection, KindRevocation} {
 		t.Run(kind, func(t *testing.T) {
 			h := newHarness(t)
 			h.finding("inc_a", true, 90)

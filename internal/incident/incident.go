@@ -7,6 +7,10 @@
 // until an expiry. Approval is never inferred from a score; it is only ever
 // a recorded human decision on a finding the policy marked eligible.
 //
+// Approval needs a quorum of distinct operators (two by default), fixed in
+// the finding record at detection time. A single operator can always reject
+// or revoke: stopping is easy, authorising is not.
+//
 // Decisions bind to the finding record they were made on. When a later run
 // records a newer finding for the same incident, the incident returns to
 // pending and needs a fresh decision.
@@ -59,6 +63,13 @@ func ParseAction(s string) (Action, error) {
 	return "", fmt.Errorf("%w: unknown action %q (want %q or %q)", ErrRefused, s, DeactivateAccessKeys, AttachDenyAllPolicy)
 }
 
+// DefaultRequiredApprovals is the two-person rule: the quorum used when a
+// finding does not record one.
+const DefaultRequiredApprovals = 2
+
+// MaxRequiredApprovals caps the quorum a finding may require.
+const MaxRequiredApprovals = 5
+
 // MaxApprovalTTL caps how long an approval stays valid.
 const MaxApprovalTTL = 24 * time.Hour
 
@@ -77,6 +88,10 @@ type FindingData struct {
 	ForecastWarnings []string         `json:"forecast_warnings,omitempty"`
 	PolicyVersion    string           `json:"policy_version"`
 	WeightsVersion   string           `json:"weights_version"`
+	// ApprovalsRequired is how many distinct operators must approve
+	// containment for this finding. It is fixed when the finding is
+	// recorded, so approvers cannot lower it.
+	ApprovalsRequired int `json:"approvals_required,omitempty"`
 }
 
 // NotificationData records a delivery attempt. The webhook URL is never recorded.
@@ -123,32 +138,51 @@ type RevocationData struct {
 type State string
 
 const (
-	StateNotEligible State = "not_eligible" // latest finding is not containment eligible
-	StatePending     State = "pending"      // eligible, no decision on the latest finding
-	StateApproved    State = "approved"     // an unexpired, unrevoked approval exists
-	StateRejected    State = "rejected"
-	StateExpired     State = "expired"
-	StateRevoked     State = "revoked"
+	StateNotEligible       State = "not_eligible"       // latest finding is not containment eligible
+	StatePending           State = "pending"            // eligible, no decision on the latest finding
+	StatePartiallyApproved State = "partially_approved" // fewer distinct approvers than required so far
+	StateApproved          State = "approved"           // enough distinct, unexpired, unrevoked approvals
+	StateRejected          State = "rejected"
+	StateExpired           State = "expired"
+	StateRevoked           State = "revoked"
 )
 
 // Status summarises one incident.
 type Status struct {
-	IncidentID    string           `json:"incident_id"`
-	Principal     string           `json:"principal"`
-	State         State            `json:"state"`
-	Confidence    float64          `json:"confidence"`
-	Decision      *policy.Decision `json:"decision,omitempty"`
-	FindingRecord string           `json:"finding_record"`
-	// DecisionRecord is the approval or rejection record behind State, if any.
-	DecisionRecord string        `json:"decision_record,omitempty"`
-	Approval       *ApprovalData `json:"approval,omitempty"`
+	IncidentID        string           `json:"incident_id"`
+	Principal         string           `json:"principal"`
+	State             State            `json:"state"`
+	Confidence        float64          `json:"confidence"`
+	Decision          *policy.Decision `json:"decision,omitempty"`
+	FindingRecord     string           `json:"finding_record"`
+	RequiredApprovals int              `json:"required_approvals"`
+	// Approvals are the current round's approvals, oldest first.
+	Approvals []ApprovalData `json:"approvals,omitempty"`
+	// ApprovalRecords are the hashes of those approval records.
+	ApprovalRecords []string `json:"approval_records,omitempty"`
+	// Action and ExpiresAt describe the current round: its action and the
+	// earliest expiry among its approvals.
+	Action    Action     `json:"action,omitempty"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	// DecisionRecord is the rejection or revocation behind those states.
+	DecisionRecord string `json:"decision_record,omitempty"`
+}
+
+// requiredApprovals returns the quorum recorded with the finding. Findings
+// recorded before the field existed default to DefaultRequiredApprovals.
+func requiredApprovals(fd FindingData) int {
+	if fd.ApprovalsRequired <= 0 {
+		return DefaultRequiredApprovals
+	}
+	return fd.ApprovalsRequired
 }
 
 type incidentRecords struct {
 	finding     evidence.Record
 	findingData FindingData
-	decision    *evidence.Record // latest approval or rejection on the latest finding
-	revoked     map[string]bool  // approval record hash -> revoked
+	// decisions are approval, rejection and revocation records appended
+	// after the latest finding record, in log order.
+	decisions []evidence.Record
 }
 
 func decode(rec evidence.Record, v any) error {
@@ -167,76 +201,122 @@ func index(records []evidence.Record) (map[string]*incidentRecords, error) {
 			if err := decode(rec, &fd); err != nil {
 				return nil, err
 			}
-			ir := byID[rec.IncidentID]
-			if ir == nil {
-				ir = &incidentRecords{revoked: map[string]bool{}}
-				byID[rec.IncidentID] = ir
+			// A newer finding needs fresh decisions.
+			byID[rec.IncidentID] = &incidentRecords{finding: rec, findingData: fd}
+		case KindApproval, KindRejection, KindRevocation:
+			if ir := byID[rec.IncidentID]; ir != nil {
+				ir.decisions = append(ir.decisions, rec)
 			}
-			// A newer finding resets the decision.
-			ir.finding, ir.findingData, ir.decision = rec, fd, nil
-		case KindApproval, KindRejection:
-			ir := byID[rec.IncidentID]
-			if ir == nil {
-				continue
-			}
-			var link struct {
-				FindingRecord string `json:"finding_record"`
-			}
-			if err := decode(rec, &link); err != nil {
-				return nil, err
-			}
-			if link.FindingRecord == ir.finding.Hash {
-				r := rec
-				ir.decision = &r
-			}
-		case KindRevocation:
-			ir := byID[rec.IncidentID]
-			if ir == nil {
-				continue
-			}
-			var rv RevocationData
-			if err := decode(rec, &rv); err != nil {
-				return nil, err
-			}
-			ir.revoked[rv.ApprovalRecord] = true
 		}
 	}
 	return byID, nil
 }
 
+type round struct {
+	approvals []ApprovalData
+	hashes    []string
+	expiresAt time.Time
+}
+
+func (r *round) reset() { *r = round{} }
+
+func (r *round) contains(hash string) bool {
+	for _, h := range r.hashes {
+		if h == hash {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *round) operators() int {
+	seen := map[string]bool{}
+	for _, a := range r.approvals {
+		seen[a.Operator] = true
+	}
+	return len(seen)
+}
+
 func status(id string, ir *incidentRecords, now time.Time) (Status, error) {
 	s := Status{
-		IncidentID:    id,
-		Principal:     ir.findingData.Finding.Principal,
-		Confidence:    ir.findingData.Finding.Confidence,
-		Decision:      ir.findingData.Decision,
-		FindingRecord: ir.finding.Hash,
+		IncidentID:        id,
+		Principal:         ir.findingData.Finding.Principal,
+		Confidence:        ir.findingData.Finding.Confidence,
+		Decision:          ir.findingData.Decision,
+		FindingRecord:     ir.finding.Hash,
+		RequiredApprovals: requiredApprovals(ir.findingData),
 	}
 	if d := ir.findingData.Decision; d == nil || !d.EligibleForContainment {
 		s.State = StateNotEligible
 		return s, nil
 	}
-	if ir.decision == nil {
-		s.State = StatePending
-		return s, nil
+
+	// Replay decisions in order. A rejection or revocation ends the current
+	// round; an approval arriving after the round expired starts a new one.
+	var cur round
+	var last string // kind of the last decision that ended a round
+	for _, rec := range ir.decisions {
+		switch rec.Kind {
+		case KindApproval:
+			var ap ApprovalData
+			if err := decode(rec, &ap); err != nil {
+				return s, err
+			}
+			if ap.FindingRecord != ir.finding.Hash {
+				continue
+			}
+			if len(cur.approvals) > 0 && !rec.Time.Before(cur.expiresAt) {
+				cur.reset()
+			}
+			if len(cur.approvals) == 0 || ap.ExpiresAt.Before(cur.expiresAt) {
+				cur.expiresAt = ap.ExpiresAt
+			}
+			cur.approvals = append(cur.approvals, ap)
+			cur.hashes = append(cur.hashes, rec.Hash)
+			last, s.DecisionRecord = "", ""
+		case KindRejection:
+			var rj RejectionData
+			if err := decode(rec, &rj); err != nil {
+				return s, err
+			}
+			if rj.FindingRecord != ir.finding.Hash {
+				continue
+			}
+			cur.reset()
+			last, s.DecisionRecord = KindRejection, rec.Hash
+		case KindRevocation:
+			var rv RevocationData
+			if err := decode(rec, &rv); err != nil {
+				return s, err
+			}
+			if !cur.contains(rv.ApprovalRecord) {
+				continue
+			}
+			cur.reset()
+			last, s.DecisionRecord = KindRevocation, rec.Hash
+		}
 	}
-	s.DecisionRecord = ir.decision.Hash
-	if ir.decision.Kind == KindRejection {
-		s.State = StateRejected
-		return s, nil
-	}
-	var ap ApprovalData
-	if err := decode(*ir.decision, &ap); err != nil {
-		return s, err
-	}
-	s.Approval = &ap
+
 	switch {
-	case ir.revoked[ir.decision.Hash]:
+	case len(cur.approvals) > 0:
+		s.Approvals, s.ApprovalRecords = cur.approvals, cur.hashes
+		s.Action = cur.approvals[0].Action
+		exp := cur.expiresAt
+		s.ExpiresAt = &exp
+		switch {
+		case !now.Before(cur.expiresAt):
+			s.State = StateExpired
+		case cur.operators() >= s.RequiredApprovals:
+			s.State = StateApproved
+		default:
+			s.State = StatePartiallyApproved
+		}
+	case last == KindRejection:
+		s.State = StateRejected
+	case last == KindRevocation:
 		s.State = StateRevoked
-	case !now.Before(ap.ExpiresAt):
-		s.State = StateExpired
 	default:
-		s.State = StateApproved
+		s.State = StatePending
 	}
 	return s, nil
 }
@@ -306,7 +386,9 @@ type ApproveRequest struct {
 }
 
 // Approve validates the request against the incident's current state and
-// returns the approval data to append.
+// returns the approval data to append. When the incident is partially
+// approved, the request joins that round: it must name the same action and
+// come from an operator, and OS account, not already in the round.
 func Approve(records []evidence.Record, req ApproveRequest, now time.Time) (ApprovalData, error) {
 	if err := req.validate(); err != nil {
 		return ApprovalData{}, err
@@ -326,6 +408,18 @@ func Approve(records []evidence.Record, req ApproveRequest, now time.Time) (Appr
 	}
 	switch s.State {
 	case StatePending, StateExpired, StateRevoked:
+	case StatePartiallyApproved:
+		if req.Action != s.Action {
+			return ApprovalData{}, fmt.Errorf("%w: incident %s has a pending approval for %s; approve that action or revoke it", ErrRefused, req.IncidentID, s.Action)
+		}
+		for _, a := range s.Approvals {
+			if a.Operator == req.Operator {
+				return ApprovalData{}, fmt.Errorf("%w: %s already approved incident %s; a different operator must approve", ErrRefused, req.Operator, req.IncidentID)
+			}
+			if a.RecordedBy != "" && a.RecordedBy == req.RecordedBy {
+				return ApprovalData{}, fmt.Errorf("%w: OS account %s already recorded an approval for incident %s; the next approval must come from another account", ErrRefused, req.RecordedBy, req.IncidentID)
+			}
+		}
 	case StateNotEligible:
 		return ApprovalData{}, fmt.Errorf("%w: incident %s is not containment eligible under the policy", ErrRefused, req.IncidentID)
 	default:
@@ -340,7 +434,8 @@ func Approve(records []evidence.Record, req ApproveRequest, now time.Time) (Appr
 	}, nil
 }
 
-// Reject validates a rejection of the incident's latest finding.
+// Reject validates a rejection of the incident's latest finding. One
+// operator can reject, including while an approval round is incomplete.
 func Reject(records []evidence.Record, id string, d Decider, now time.Time) (RejectionData, error) {
 	if err := d.validate(); err != nil {
 		return RejectionData{}, err
@@ -350,7 +445,7 @@ func Reject(records []evidence.Record, id string, d Decider, now time.Time) (Rej
 		return RejectionData{}, err
 	}
 	switch s.State {
-	case StatePending, StateExpired, StateRevoked:
+	case StatePending, StatePartiallyApproved, StateExpired, StateRevoked:
 	case StateNotEligible:
 		return RejectionData{}, fmt.Errorf("%w: incident %s is not containment eligible; there is nothing to reject", ErrRefused, id)
 	default:
@@ -359,7 +454,8 @@ func Reject(records []evidence.Record, id string, d Decider, now time.Time) (Rej
 	return RejectionData{Decider: d, FindingRecord: s.FindingRecord}, nil
 }
 
-// Revoke validates withdrawing the incident's active approval.
+// Revoke validates withdrawing the incident's current approval round, whether
+// complete or partial. One operator can revoke.
 func Revoke(records []evidence.Record, id string, d Decider, now time.Time) (RevocationData, error) {
 	if err := d.validate(); err != nil {
 		return RevocationData{}, err
@@ -368,8 +464,8 @@ func Revoke(records []evidence.Record, id string, d Decider, now time.Time) (Rev
 	if err != nil {
 		return RevocationData{}, err
 	}
-	if s.State != StateApproved {
+	if s.State != StateApproved && s.State != StatePartiallyApproved {
 		return RevocationData{}, fmt.Errorf("%w: incident %s has no active approval (state %s)", ErrRefused, id, s.State)
 	}
-	return RevocationData{Decider: d, ApprovalRecord: s.DecisionRecord}, nil
+	return RevocationData{Decider: d, ApprovalRecord: s.ApprovalRecords[len(s.ApprovalRecords)-1]}, nil
 }
