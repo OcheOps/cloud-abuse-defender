@@ -23,7 +23,7 @@ Stolen cloud credentials and cryptojacking can turn a security incident into a h
 See [architecture](docs/architecture.md) and [threat model](docs/threat-model.md).
 
 Initial components:
-1. Telemetry adapters: **AWS CloudTrail log replay and Bedrock CloudWatch metrics conversion (implemented, offline)**; host agent and Kubernetes events planned.
+1. Telemetry adapters: **AWS CloudTrail log replay, Bedrock CloudWatch metrics conversion and Linux host snapshots (implemented)**; Kubernetes events planned.
 2. **Detector (implemented)**: correlates CloudTrail indicators per principal into scored, explainable findings. Anomaly baselines and host cryptominer indicators are planned.
 3. **Policy engine (implemented)**: pure Go spending projection + risk gate.
    **Bedrock cost estimator (implemented)**: prices observed token usage with a versioned pricing table and flags unreliable forecasts.
@@ -250,6 +250,41 @@ Rules enforced:
 
 Identity is **not authenticated**: `operator` is what was typed, and `recorded_by` is the local OS account that ran the command. The distinct-account check stops one person approving twice from the same login, but someone with two accounts, or write access to the log, could still satisfy the quorum alone. Treat approvals as an audit trail of claims until an authenticated approval path exists. `-approvals-required 1` turns the two-person rule off for single-operator teams; that choice is recorded in each finding.
 
+### Scan a Linux host for cryptominers
+
+```sh
+go run ./cmd/cad host-snapshot > snapshot.json     # run on the host; root sees every process
+go run ./cmd/cad host-scan -file snapshot.json -min-confidence 50
+```
+
+`host-snapshot` only **reads** `/proc`. It records each process's name, executable, command line, owner and CPU use over a 2-second sample (`-sample`), plus outbound TCP connections from `/proc/net/tcp{,6}`. It never signals or changes a process. Values that look like secrets (`--password=…`, `--token x`, `-p x`, `API_KEY=…`, `user:pass@` in URLs) are masked before the snapshot is written. Run it as root to see every process; without root, other users' executables and connections are left out.
+
+`host-scan` scores each process with the same noisy-OR method as the CloudTrail detector:
+
+| Indicator | Weight | Trigger |
+|---|---|---|
+| `stratum_url` | 0.80 | `stratum+tcp://` or `stratum+ssl://` on the command line |
+| `miner_process_name` | 0.70 | known miner names (xmrig, kdevtmpfsi, kinsing, t-rex, lolminer, …) |
+| `miner_arguments` | 0.50 | `--donate-level`, `--randomx…`, `--cpu-max-threads-hint`, or `-a`/`--algo` with a mining algorithm |
+| `mining_pool_domain` | 0.50 | well-known pool domains on the command line |
+| `mining_pool_port` | 0.35 | a connection to a common pool port (3333, 4444, 5555, 7777, 14433, 14444, …) |
+| `deleted_executable` | 0.30 | the binary was deleted after starting |
+| `temp_dir_executable` | 0.30 | runs from `/tmp`, `/dev/shm` or `/var/tmp` |
+| `high_cpu` | 0.15 | 90% or more of one core |
+
+Tuning fixtures in `internal/host/testdata/`:
+
+| Fixture | Top score |
+|---|---|
+| `benign_web_server` (nginx, postgres, node) | no finding |
+| `benign_ml_training` (python at 780% CPU) | 15.0 |
+| `benign_go_build` (test binary from `/tmp` at high CPU) | 40.5 |
+| `attack_renamed_miner` (`/dev/shm/.kworkerds` to supportxmr) | 85.1 |
+| `attack_kinsing` (`kdevtmpfsi` in `/tmp` to port 4444) | 88.4 |
+| `attack_xmrig` (deleted `/tmp/.x/xmrig`, stratum to port 3333) | 99.2 |
+
+Generic signals are weighted low on purpose: builds run from `/tmp` and package upgrades leave deleted binaries running, so neither alone reaches the alert threshold of 50. A test locks the scores, and another fails if the weights change without bumping `host.WeightsVersion`. Host findings aren't yet connected to the alerting and evidence pipeline.
+
 ## Roadmap
 
 - [x] Initial Go module and tested policy evaluator
@@ -259,7 +294,7 @@ Identity is **not authenticated**: `operator` is what was typed, and `recorded_b
 - [x] CloudTrail adapter with event replay tests (offline log files; S3/EventBridge ingestion still planned)
 - [x] Indicator correlation and confidence scoring (CloudTrail)
 - [x] Slack/webhook alert integration with de-duplication
-- [ ] Host runtime cryptojacking indicators
+- [x] Host runtime cryptojacking indicators (Linux `/proc` snapshots; not yet connected to alerts)
 - [ ] Kubernetes integration
 - [ ] Auditable approval and containment orchestration
 - [ ] Azure and GCP integrations

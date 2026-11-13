@@ -17,6 +17,7 @@ import (
 	"github.com/OcheOps/cloud-abuse-defender/internal/cost"
 	"github.com/OcheOps/cloud-abuse-defender/internal/detect"
 	"github.com/OcheOps/cloud-abuse-defender/internal/evidence"
+	"github.com/OcheOps/cloud-abuse-defender/internal/host"
 	"github.com/OcheOps/cloud-abuse-defender/internal/incident"
 	"github.com/OcheOps/cloud-abuse-defender/internal/policy"
 )
@@ -896,6 +897,78 @@ func TestRunApprovalsRequiredFlag(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, code, stderr := runDetectCmd(t, append([]string{"-file", incidentLog}, tc.args...)...)
+			if code != 2 || !strings.Contains(stderr, tc.want) {
+				t.Fatalf("exit %d, stderr %q, want %q", code, stderr, tc.want)
+			}
+		})
+	}
+}
+
+const hostFixtures = "../../internal/host/testdata/"
+
+func TestRunHostScan(t *testing.T) {
+	out, code, stderr := runCmd(t, "host-scan", "-file", hostFixtures+"attack_kinsing.json")
+	var got hostScanOutput
+	if code != 0 || json.Unmarshal([]byte(out), &got) != nil {
+		t.Fatalf("exit %d %s %s", code, out, stderr)
+	}
+	if got.Host != "db-03" || got.WeightsVersion != host.WeightsVersion || len(got.Findings) != 2 || got.Findings[0].Confidence != 88.4 {
+		t.Fatalf("unexpected scan: %+v", got)
+	}
+	out, code, _ = runCmd(t, "host-scan", "-file", hostFixtures+"benign_go_build.json", "-min-confidence", "50")
+	if code != 0 || !strings.Contains(out, `"findings": []`) {
+		t.Fatalf("benign build above 50: %s", out)
+	}
+}
+
+func TestRunHostSnapshotRoundTrip(t *testing.T) {
+	old := hostname
+	hostname = func() (string, error) { return "test-host", nil }
+	t.Cleanup(func() { hostname = old })
+	root := t.TempDir()
+	write := func(rel, content string) {
+		p := filepath.Join(root, rel)
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("42/stat", "42 (xmrig) S 1 1 1 0 -1 0 0 0 0 0 10 0 0 0 20 0 1 0 1 1 1\n")
+	write("42/comm", "xmrig\n")
+	const fakeSecret = "not-a-real-secret"
+	write("42/cmdline", "xmrig\x00--donate-level=1\x00--pass="+fakeSecret+"\x00")
+	out, code, stderr := runCmd(t, "host-snapshot", "-proc", root, "-sample", "0")
+	if code != 0 {
+		t.Fatalf("exit %d %s", code, stderr)
+	}
+	if strings.Contains(out, fakeSecret) || !strings.Contains(out, `"host": "test-host"`) {
+		t.Fatalf("snapshot leaked a secret or lost the host name: %s", out)
+	}
+	snapPath := filepath.Join(t.TempDir(), "snap.json")
+	os.WriteFile(snapPath, []byte(out), 0o600)
+	scan, code, stderr := runCmd(t, "host-scan", "-file", snapPath)
+	if code != 0 || !strings.Contains(scan, "miner_process_name") || !strings.Contains(scan, "miner_arguments") {
+		t.Fatalf("scan of collected snapshot: %d %s %s", code, scan, stderr)
+	}
+}
+
+func TestRunHostErrors(t *testing.T) {
+	bad := filepath.Join(t.TempDir(), "bad.json")
+	os.WriteFile(bad, []byte(`{"processes":[]}`), 0o600)
+	for name, tc := range map[string]struct {
+		args []string
+		want string
+	}{
+		"scan no file":       {[]string{"host-scan"}, "-file is required"},
+		"scan bad threshold": {[]string{"host-scan", "-file", bad, "-min-confidence", "101"}, "between 0 and 100"},
+		"scan invalid":       {[]string{"host-scan", "-file", bad}, "collected_at is required"},
+		"scan missing":       {[]string{"host-scan", "-file", bad + ".nope"}, "no such file"},
+		"snapshot bad root":  {[]string{"host-snapshot", "-proc", filepath.Join(t.TempDir(), "nope"), "-sample", "0"}, "invalid host snapshot"},
+		"snapshot neg":       {[]string{"host-snapshot", "-sample", "-1s"}, "must not be negative"},
+		"snapshot extra":     {[]string{"host-snapshot", "x"}, "unexpected arguments"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, code, stderr := runCmd(t, tc.args...)
 			if code != 2 || !strings.Contains(stderr, tc.want) {
 				t.Fatalf("exit %d, stderr %q, want %q", code, stderr, tc.want)
 			}
