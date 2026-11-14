@@ -88,6 +88,13 @@ func verify(r io.Reader, each func(Record)) (Head, error) {
 		if rec.Hash != want {
 			return head, fmt.Errorf("%w: line %d (seq %d): hash mismatch (record modified)", ErrInvalid, line, rec.Seq)
 		}
+		// The hash covers the decoded values, and JSON decoding is lenient
+		// (key case, whitespace, duplicate keys). Requiring the exact bytes
+		// Append wrote closes that gap: any edit at all is detected.
+		canonical, err := json.Marshal(rec)
+		if err != nil || !bytes.Equal(canonical, sc.Bytes()) {
+			return head, fmt.Errorf("%w: line %d (seq %d): record is not in the form it was written (modified)", ErrInvalid, line, rec.Seq)
+		}
 		head = Head{Records: rec.Seq, Hash: rec.Hash}
 		if each != nil {
 			each(rec)

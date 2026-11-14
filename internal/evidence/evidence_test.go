@@ -134,6 +134,12 @@ func TestTamperingDetected(t *testing.T) {
 			ls[1] = string(b)
 			return ls
 		},
+		"key case changed": func(ls []string) []string { ls[1] = strings.Replace(ls[1], `"seq"`, `"Seq"`, 1); return ls },
+		"whitespace added": func(ls []string) []string { ls[1] = strings.Replace(ls[1], `{"seq"`, `{ "seq"`, 1); return ls },
+		"duplicate key": func(ls []string) []string {
+			ls[1] = strings.Replace(ls[1], `{"seq":2,`, `{"seq":9,"seq":2,`, 1)
+			return ls
+		},
 		"not json":      func(ls []string) []string { ls[2] = "garbage"; return ls },
 		"unknown field": func(ls []string) []string { ls[2] = strings.Replace(ls[2], `{"seq"`, `{"extra":1,"seq"`, 1); return ls },
 	}
