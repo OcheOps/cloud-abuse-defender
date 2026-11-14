@@ -22,6 +22,7 @@ import (
 
 	"github.com/OcheOps/cloud-abuse-defender/internal/cost"
 	"github.com/OcheOps/cloud-abuse-defender/internal/detect"
+	"github.com/OcheOps/cloud-abuse-defender/internal/host"
 	"github.com/OcheOps/cloud-abuse-defender/internal/policy"
 )
 
@@ -67,12 +68,16 @@ type Evidence struct {
 type Alert struct {
 	Schema      string    `json:"schema"`
 	GeneratedAt time.Time `json:"generated_at"`
-	IncidentID  string    `json:"incident_id"`
+	// Source is "cloudtrail" or "host".
+	Source     string `json:"source"`
+	IncidentID string `json:"incident_id"`
 	// EvidenceHash is the hash of the evidence-log record behind this alert,
 	// when an evidence log is kept. Keeping it outside the log lets a later
 	// rewrite of the whole log be detected.
-	EvidenceHash   string           `json:"evidence_hash,omitempty"`
-	Principal      string           `json:"principal"`
+	EvidenceHash string `json:"evidence_hash,omitempty"`
+	Principal    string `json:"principal"`
+	// Linked are identities the principal created whose activity is included.
+	Linked         []string         `json:"linked_principals,omitempty"`
 	AccountIDs     []string         `json:"account_ids,omitempty"`
 	Regions        []string         `json:"regions,omitempty"`
 	First          time.Time        `json:"first_event_time"`
@@ -93,8 +98,10 @@ func FromFinding(f detect.Finding, decision *policy.Decision, estimate *cost.Est
 	a := Alert{
 		Schema:      Schema,
 		GeneratedAt: now.UTC(),
+		Source:      SourceCloudTrail,
 		IncidentID:  f.IncidentID(),
 		Principal:   f.Principal,
+		Linked:      f.LinkedPrincipals,
 		AccountIDs:  f.AccountIDs,
 		Regions:     f.Regions,
 		First:       f.First,
@@ -118,6 +125,40 @@ func FromFinding(f detect.Finding, decision *policy.Decision, estimate *cost.Est
 		a.PricingVersion = estimate.PricingVersion
 		a.HourlyCostUSD = estimate.HourlyCostUSD
 	}
+	return a
+}
+
+// Alert sources.
+const (
+	SourceCloudTrail = "cloudtrail"
+	SourceHost       = "host"
+)
+
+// FromHost builds an alert for a suspicious process. The command line and
+// connection details stay in the scan output and evidence log; the alert
+// carries only the host, process name, PID and indicator names.
+func FromHost(f host.Finding, collectedAt, now time.Time) Alert {
+	a := Alert{
+		Schema:      Schema,
+		GeneratedAt: now.UTC(),
+		Source:      SourceHost,
+		IncidentID:  f.IncidentID(),
+		Principal:   fmt.Sprintf("host:%s process:%s pid:%d", f.Host, f.Name, f.PID),
+		First:       collectedAt,
+		Last:        collectedAt,
+		Confidence:  f.Confidence,
+		Evidence:    make([]Evidence, 0, len(f.Contributors)),
+		Note:        Note,
+	}
+	for _, c := range f.Contributors {
+		a.Evidence = append(a.Evidence, Evidence{Kind: "indicator", Name: string(c.Indicator), Weight: c.Weight, EventCount: 1})
+	}
+	sort.SliceStable(a.Evidence, func(i, j int) bool {
+		if a.Evidence[i].Weight != a.Evidence[j].Weight {
+			return a.Evidence[i].Weight > a.Evidence[j].Weight
+		}
+		return a.Evidence[i].Name < a.Evidence[j].Name
+	})
 	return a
 }
 
@@ -187,10 +228,18 @@ func slackMessage(a Alert) slackPayload {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "*Incident:* `%s`\n", slackEscape(a.IncidentID))
-	fmt.Fprintf(&b, "*Principal:* `%s`\n", slackEscape(a.Principal))
-	fmt.Fprintf(&b, "*Accounts:* %s\n", slackEscape(joinOrNone(a.AccountIDs)))
-	fmt.Fprintf(&b, "*Regions:* %s\n", slackEscape(joinOrNone(a.Regions)))
-	fmt.Fprintf(&b, "*Activity:* %s to %s\n", a.First.UTC().Format(time.RFC3339), a.Last.UTC().Format(time.RFC3339))
+	if a.Source == SourceHost {
+		fmt.Fprintf(&b, "*Process:* `%s`\n", slackEscape(a.Principal))
+		fmt.Fprintf(&b, "*Observed:* %s\n", a.Last.UTC().Format(time.RFC3339))
+	} else {
+		fmt.Fprintf(&b, "*Principal:* `%s`\n", slackEscape(a.Principal))
+		if len(a.Linked) > 0 {
+			fmt.Fprintf(&b, "*Created identities:* %s\n", slackEscape(strings.Join(a.Linked, ", ")))
+		}
+		fmt.Fprintf(&b, "*Accounts:* %s\n", slackEscape(joinOrNone(a.AccountIDs)))
+		fmt.Fprintf(&b, "*Regions:* %s\n", slackEscape(joinOrNone(a.Regions)))
+		fmt.Fprintf(&b, "*Activity:* %s to %s\n", a.First.UTC().Format(time.RFC3339), a.Last.UTC().Format(time.RFC3339))
+	}
 	fmt.Fprintf(&b, "*Evidence:* %s", slackEscape(joinOrNone(evidence)))
 	if d := a.Decision; d != nil {
 		fmt.Fprintf(&b, "\n*Decision:* %s: %s", slackEscape(string(d.Action)), slackEscape(d.Reason))

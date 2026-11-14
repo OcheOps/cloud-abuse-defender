@@ -12,6 +12,7 @@
       "access_key_id": "AKIA************DMN1",
       "source_ip": "192.0.2.10",
       "user_agent": "aws-cli/2.15.0",
+      "target_user": "new-analyst",
       "indicators": [
         "credential_creation"
       ]
@@ -28,6 +29,7 @@
       "access_key_id": "AKIA************DMN1",
       "source_ip": "192.0.2.10",
       "user_agent": "aws-cli/2.15.0",
+      "target_user": "new-analyst",
       "indicators": [
         "credential_creation"
       ]

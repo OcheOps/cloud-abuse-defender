@@ -83,7 +83,16 @@ const (
 	AccessDenied Indicator = "access_denied"
 	// RootActivity: a call made directly by the account root user.
 	RootActivity Indicator = "root_activity"
+	// AlternateComputeLaunch: compute started through ECS, Batch, SageMaker or
+	// Lambda rather than EC2. Common in normal deployments, so it is weak
+	// alone; it matters when combined with evasion or new credentials.
+	AlternateComputeLaunch Indicator = "alternate_compute_launch"
+	// PrivilegeEscalation: an administrator policy attached to a user, role or group.
+	PrivilegeEscalation Indicator = "privilege_escalation"
 )
+
+// adminPolicySuffix identifies the AWS managed administrator policy in any partition.
+const adminPolicySuffix = ":iam::aws:policy/AdministratorAccess"
 
 // BulkInstanceThreshold is the requested instance count at or above which a
 // single RunInstances call is tagged BulkInstanceLaunch.
@@ -106,7 +115,24 @@ var actionIndicators = map[string]Indicator{
 	"iam:UpdateLoginProfile":                            CredentialCreation,
 	"iam:CreateUser":                                    CredentialCreation,
 	"servicequotas:RequestServiceQuotaIncrease":         QuotaIncreaseRequest,
+	"ecs:RunTask":                                       AlternateComputeLaunch,
+	"ecs:CreateService":                                 AlternateComputeLaunch,
+	"batch:SubmitJob":                                   AlternateComputeLaunch,
+	"batch:CreateComputeEnvironment":                    AlternateComputeLaunch,
+	"sagemaker:CreateNotebookInstance":                  AlternateComputeLaunch,
+	"sagemaker:CreateTrainingJob":                       AlternateComputeLaunch,
+	"sagemaker:CreateProcessingJob":                     AlternateComputeLaunch,
+	"lambda:CreateFunction20150331":                     AlternateComputeLaunch,
 }
+
+// attachPolicyActions are the IAM calls checked for an administrator policy.
+var attachPolicyActions = map[string]bool{"AttachUserPolicy": true, "AttachRolePolicy": true, "AttachGroupPolicy": true}
+
+// userTargetActions are the IAM calls whose target user is extracted, so the
+// detector can follow an identity created or re-keyed by another principal.
+var userTargetActions = map[string]bool{"CreateUser": true, "CreateAccessKey": true, "CreateLoginProfile": true, "UpdateLoginProfile": true}
+
+const maxTargetUserLen = 128
 
 var accessDeniedCodes = map[string]bool{
 	"AccessDenied":                 true,
@@ -120,21 +146,23 @@ var acceleratedFamilies = map[string]bool{"p": true, "g": true, "inf": true, "tr
 
 // Event is a normalized, redacted CloudTrail event.
 type Event struct {
-	Time          time.Time   `json:"time"`
-	EventID       string      `json:"event_id"`
-	Service       string      `json:"service"`
-	Action        string      `json:"action"`
-	Region        string      `json:"region"`
-	AccountID     string      `json:"account_id,omitempty"`
-	PrincipalType string      `json:"principal_type,omitempty"`
-	PrincipalARN  string      `json:"principal_arn,omitempty"`
-	AccessKeyID   string      `json:"access_key_id,omitempty"`
-	SourceIP      string      `json:"source_ip,omitempty"`
-	UserAgent     string      `json:"user_agent,omitempty"`
-	ErrorCode     string      `json:"error_code,omitempty"`
-	InstanceType  string      `json:"instance_type,omitempty"`
-	InstanceCount int         `json:"instance_count,omitempty"`
-	Indicators    []Indicator `json:"indicators,omitempty"`
+	Time          time.Time `json:"time"`
+	EventID       string    `json:"event_id"`
+	Service       string    `json:"service"`
+	Action        string    `json:"action"`
+	Region        string    `json:"region"`
+	AccountID     string    `json:"account_id,omitempty"`
+	PrincipalType string    `json:"principal_type,omitempty"`
+	PrincipalARN  string    `json:"principal_arn,omitempty"`
+	AccessKeyID   string    `json:"access_key_id,omitempty"`
+	SourceIP      string    `json:"source_ip,omitempty"`
+	UserAgent     string    `json:"user_agent,omitempty"`
+	ErrorCode     string    `json:"error_code,omitempty"`
+	InstanceType  string    `json:"instance_type,omitempty"`
+	InstanceCount int       `json:"instance_count,omitempty"`
+	// TargetUser is the IAM user name a credential-creating call acted on.
+	TargetUser string      `json:"target_user,omitempty"`
+	Indicators []Indicator `json:"indicators,omitempty"`
 }
 
 // Summary aggregates a set of normalized events.
@@ -281,6 +309,39 @@ func Normalize(rec Record) Event {
 		}
 		if ev.InstanceCount >= BulkInstanceThreshold {
 			add(BulkInstanceLaunch)
+		}
+	}
+	if ev.Service == "sagemaker" {
+		// SageMaker types look like "ml.p3.2xlarge"; only the type is read.
+		var p struct {
+			InstanceType   string `json:"instanceType"`
+			ResourceConfig struct {
+				InstanceType string `json:"instanceType"`
+			} `json:"resourceConfig"`
+		}
+		if json.Unmarshal(rec.RequestParameters, &p) == nil {
+			t := p.InstanceType
+			if t == "" {
+				t = p.ResourceConfig.InstanceType
+			}
+			if accelerated(strings.TrimPrefix(t, "ml.")) {
+				ev.InstanceType = t
+				add(GPUInstanceLaunch)
+			}
+		}
+	}
+	if ev.Service == "iam" && (attachPolicyActions[ev.Action] || userTargetActions[ev.Action]) {
+		var p struct {
+			UserName  string `json:"userName"`
+			PolicyARN string `json:"policyArn"`
+		}
+		if json.Unmarshal(rec.RequestParameters, &p) == nil {
+			if userTargetActions[ev.Action] && len(p.UserName) <= maxTargetUserLen {
+				ev.TargetUser = p.UserName
+			}
+			if attachPolicyActions[ev.Action] && strings.HasSuffix(p.PolicyARN, adminPolicySuffix) {
+				add(PrivilegeEscalation)
+			}
 		}
 	}
 	if ind, ok := actionIndicators[ev.Service+":"+ev.Action]; ok {

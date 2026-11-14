@@ -249,3 +249,65 @@ func TestSummarizeEmpty(t *testing.T) {
 		t.Fatalf("unexpected summary: %+v", s)
 	}
 }
+
+func TestNewIndicators(t *testing.T) {
+	mk := func(source, name, params string) Event {
+		rec := baseRecord()
+		rec.EventSource, rec.EventName = source+".amazonaws.com", name
+		rec.RequestParameters = json.RawMessage(params)
+		return Normalize(rec)
+	}
+	has := func(ev Event, ind Indicator) bool {
+		for _, i := range ev.Indicators {
+			if i == ind {
+				return true
+			}
+		}
+		return false
+	}
+	for _, c := range []struct{ source, name string }{
+		{"ecs", "RunTask"}, {"ecs", "CreateService"}, {"batch", "SubmitJob"}, {"batch", "CreateComputeEnvironment"},
+		{"sagemaker", "CreateProcessingJob"}, {"lambda", "CreateFunction20150331"},
+	} {
+		if ev := mk(c.source, c.name, `{}`); !has(ev, AlternateComputeLaunch) {
+			t.Errorf("%s:%s should be alternate_compute_launch", c.source, c.name)
+		}
+	}
+	nb := mk("sagemaker", "CreateNotebookInstance", `{"instanceType":"ml.p3.2xlarge"}`)
+	if !has(nb, GPUInstanceLaunch) || !has(nb, AlternateComputeLaunch) || nb.InstanceType != "ml.p3.2xlarge" {
+		t.Errorf("GPU notebook: %+v", nb)
+	}
+	if tj := mk("sagemaker", "CreateTrainingJob", `{"resourceConfig":{"instanceType":"ml.g5.xlarge"}}`); !has(tj, GPUInstanceLaunch) {
+		t.Errorf("GPU training job: %+v", tj)
+	}
+	if cpu := mk("sagemaker", "CreateNotebookInstance", `{"instanceType":"ml.t3.medium"}`); has(cpu, GPUInstanceLaunch) || cpu.InstanceType != "" {
+		t.Errorf("CPU notebook flagged as GPU: %+v", cpu)
+	}
+
+	for _, action := range []string{"AttachUserPolicy", "AttachRolePolicy", "AttachGroupPolicy"} {
+		if ev := mk("iam", action, `{"policyArn":"arn:aws:iam::aws:policy/AdministratorAccess"}`); !has(ev, PrivilegeEscalation) {
+			t.Errorf("%s with AdministratorAccess should be privilege_escalation", action)
+		}
+	}
+	if ev := mk("iam", "AttachUserPolicy", `{"policyArn":"arn:aws-us-gov:iam::aws:policy/AdministratorAccess"}`); !has(ev, PrivilegeEscalation) {
+		t.Error("other partitions must match")
+	}
+	for _, params := range []string{`{"policyArn":"arn:aws:iam::aws:policy/ReadOnlyAccess"}`, `{"policyArn":"arn:aws:iam::123456789012:policy/AdministratorAccess"}`, `null`, `"x"`} {
+		if ev := mk("iam", "AttachUserPolicy", params); has(ev, PrivilegeEscalation) {
+			t.Errorf("params %s must not be privilege_escalation", params)
+		}
+	}
+	if ev := mk("iam", "DetachUserPolicy", `{"policyArn":"arn:aws:iam::aws:policy/AdministratorAccess"}`); has(ev, PrivilegeEscalation) {
+		t.Error("detaching is not escalation")
+	}
+
+	if ev := mk("iam", "CreateAccessKey", `{"userName":"backup-svc"}`); ev.TargetUser != "backup-svc" {
+		t.Errorf("target user: %+v", ev)
+	}
+	if ev := mk("iam", "AttachUserPolicy", `{"userName":"x","policyArn":"p"}`); ev.TargetUser != "" {
+		t.Errorf("only credential-creating calls record a target: %+v", ev)
+	}
+	if ev := mk("iam", "CreateUser", `{"userName":"`+strings.Repeat("a", maxTargetUserLen+1)+`"}`); ev.TargetUser != "" {
+		t.Error("oversized user name must be dropped")
+	}
+}

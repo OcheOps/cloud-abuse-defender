@@ -66,7 +66,8 @@ func TestRunErrors(t *testing.T) {
 		{"invalid input", []string{"-confidence", "101"}, "threat_confidence"},
 		{"zero gates", []string{"-threshold", "0"}, "threshold_usd"},
 		{"unknown flag", []string{"-nope"}, "flag provided but not defined"},
-		{"positional args", []string{"extra"}, "unexpected arguments"},
+		{"unknown command", []string{"extra"}, `unknown command "extra"`},
+		{"positional args", []string{"-hours", "1", "extra"}, "unexpected arguments"},
 		{"usage without pricing", []string{"-usage", exampleUsage}, "must be used together"},
 		{"pricing without usage", []string{"-pricing", examplePricing}, "must be used together"},
 		{"rate with usage", []string{"-usage", exampleUsage, "-pricing", examplePricing, "-hourly-rate", "5"}, "cannot be combined"},
@@ -893,7 +894,7 @@ func TestRunApprovalsRequiredFlag(t *testing.T) {
 	}{
 		"zero":        {[]string{"-evidence-log", filepath.Join(t.TempDir(), "e"), "-approvals-required", "0"}, "between 1 and 5"},
 		"too many":    {[]string{"-evidence-log", filepath.Join(t.TempDir(), "e"), "-approvals-required", "6"}, "between 1 and 5"},
-		"without log": {[]string{"-approvals-required", "3"}, "requires -evidence-log"},
+		"without log": {[]string{"-approvals-required", "3"}, "require -evidence-log"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, code, stderr := runDetectCmd(t, append([]string{"-file", incidentLog}, tc.args...)...)
@@ -973,5 +974,321 @@ func TestRunHostErrors(t *testing.T) {
 				t.Fatalf("exit %d, stderr %q, want %q", code, stderr, tc.want)
 			}
 		})
+	}
+}
+
+func TestRunHelpAndVersion(t *testing.T) {
+	for _, arg := range []string{"help", "-h", "--help"} {
+		out, code, _ := runCmd(t, arg)
+		if code != 0 || !strings.Contains(out, "Usage: cad <command>") {
+			t.Fatalf("%s: exit %d %q", arg, code, out)
+		}
+		// Every dispatched command must be listed.
+		for _, cmd := range []string{"detect", "cloudtrail", "host-snapshot", "host-scan", "policy", "bedrock-queries", "bedrock-usage",
+			"evidence-verify", "approvals", "approve, reject, revoke", "keygen", "version"} {
+			if !strings.Contains(out, "  "+cmd) {
+				t.Errorf("help does not list %q", cmd)
+			}
+		}
+	}
+	out, code, _ := runCmd(t, "version")
+	var v versionOutput
+	if code != 0 || json.Unmarshal([]byte(out), &v) != nil || v.Version != "dev" || v.PolicyVersion != policy.Version ||
+		v.WeightsVersion != detect.WeightsVersion || v.HostWeightsVersion != host.WeightsVersion || v.Go == "" {
+		t.Fatalf("version: %d %s", code, out)
+	}
+	// "policy" is an explicit name for the default command.
+	out, code, _ = runCmd(t, "policy", "-confidence", "10")
+	if code != 0 || !strings.Contains(out, policy.ReasonLowConfidence) {
+		t.Fatalf("policy subcommand: %d %s", code, out)
+	}
+}
+
+func writeFile(t *testing.T, name, content string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+const (
+	exampleEC2Pricing = "../../examples/ec2-pricing.example.json"
+	quietMining       = "../../internal/cloudtrail/testdata/attack_cryptojacking_quiet.json"
+	trainingJob       = "../../internal/cloudtrail/testdata/benign_gpu_training_job.json"
+	pivotLog          = "../../internal/cloudtrail/testdata/attack_identity_pivot.json"
+)
+
+func TestRunDetectEC2Pricing(t *testing.T) {
+	got, code, stderr := runDetectCmd(t, "-file", quietMining, "-ec2-pricing", exampleEC2Pricing, "-allow-containment")
+	if code != 0 {
+		t.Fatalf("exit %d %s", code, stderr)
+	}
+	f := got.Findings[0]
+	// 10 x g4dn.12xlarge in us-east-1 and us-west-2 at $4, 10 x g5.12xlarge in eu-west-1 at $6.5.
+	if f.EC2Estimate == nil || f.HourlyCostUSD != 145 || len(f.EC2Estimate.Lines) != 3 || len(f.Launches) != 3 {
+		t.Fatalf("EC2 estimate: %+v launches %+v", f.EC2Estimate, f.Launches)
+	}
+	if f.Decision == nil || f.Decision.ProjectedCostUSD != 145*24 || f.Decision.Action != policy.RecommendContainment {
+		t.Fatalf("decision: %+v", f.Decision)
+	}
+
+	// An instance type missing from the table degrades the decision to alert-only.
+	table := `{"version":"t1","provider":"aws-ec2","currency":"USD","effective_date":"2026-11-01T00:00:00Z","regions":{"us-east-1":{"g4dn.12xlarge":4}}}`
+	got, code, stderr = runDetectCmd(t, "-file", quietMining, "-ec2-pricing", writeFile(t, "ec2.json", table), "-allow-containment")
+	if code != 0 {
+		t.Fatalf("exit %d %s", code, stderr)
+	}
+	d := got.Findings[0].Decision
+	if d.Action != policy.Alert || d.Reason != policy.ReasonDegradedForecast || len(d.ForecastWarnings) != 2 {
+		t.Fatalf("unpriced launches must degrade: %+v", d)
+	}
+
+	// Bedrock usage and EC2 launches add up.
+	got, _, _ = runDetectCmd(t, "-file", quietMining, "-ec2-pricing", exampleEC2Pricing, "-usage", exampleUsage, "-pricing", examplePricing)
+	if got.Findings[0].HourlyCostUSD != 145+56 {
+		t.Fatalf("combined rate: %v", got.Findings[0].HourlyCostUSD)
+	}
+	// Stale EC2 pricing degrades too.
+	got, _, _ = runDetectCmd(t, "-file", quietMining, "-ec2-pricing", exampleEC2Pricing, "-allow-containment", "-max-pricing-age", "1h")
+	if got.Findings[0].Decision.Reason != policy.ReasonDegradedForecast {
+		t.Fatalf("stale EC2 pricing: %+v", got.Findings[0].Decision)
+	}
+	if _, code, stderr := runDetectCmd(t, "-file", quietMining, "-ec2-pricing", examplePricing); code != 2 || !strings.Contains(stderr, "invalid cost input") {
+		t.Fatalf("wrong table type: %d %s", code, stderr)
+	}
+}
+
+func TestRunDetectSuppressions(t *testing.T) {
+	rules := func(expires string) string {
+		return writeFile(t, "s.json", `{"version":"sup-1","rules":[{"principal":"arn:aws:iam::123456789012:user/ml-platform",
+			"indicators":["gpu_instance_launch","quota_increase_request"],"reason":"scheduled training","expires":"`+expires+`"}]}`)
+	}
+	got, code, stderr := runDetectCmd(t, "-file", trainingJob)
+	if code != 0 || len(got.Findings) != 1 || got.Findings[0].Confidence != 72 {
+		t.Fatalf("control: %d %+v %s", code, got.Findings, stderr)
+	}
+	got, code, stderr = runDetectCmd(t, "-file", trainingJob, "-suppressions", rules("2027-01-01T00:00:00Z"))
+	if code != 0 || len(got.Findings) != 0 || len(got.Suppressed) != 2 || got.Suppressed[0].Reason != "scheduled training" {
+		t.Fatalf("suppressed: %d %+v %s", code, got, stderr)
+	}
+	var out, errOut bytes.Buffer
+	run([]string{"detect", "-file", trainingJob, "-suppressions", rules("2026-01-01T00:00:00Z")}, &out, &errOut, now)
+	if !strings.Contains(errOut.String(), "1 suppression rule(s)") || !strings.Contains(out.String(), `"confidence": 72`) {
+		t.Fatalf("expired rule: %s %s", errOut.String(), out.String())
+	}
+	bad := writeFile(t, "bad.json", `{"version":"s","rules":[{"principal":"*","indicators":["access_denied"],"reason":"r","expires":"2027-01-01T00:00:00Z"}]}`)
+	if _, code, stderr := runDetectCmd(t, "-file", trainingJob, "-suppressions", bad); code != 2 || !strings.Contains(stderr, "bare wildcard") {
+		t.Fatalf("bad rules: %d %s", code, stderr)
+	}
+}
+
+func TestRunDetectConfigFile(t *testing.T) {
+	cfg := writeFile(t, "cad.json", `{"ec2-pricing": "`+exampleEC2Pricing+`", "allow-containment": true, "threshold": 5000, "window": "2h"}`)
+	got, code, stderr := runDetectCmd(t, "-file", quietMining, "-config", cfg)
+	if code != 0 {
+		t.Fatalf("exit %d %s", code, stderr)
+	}
+	// 145/h * 24h = 3480 < 5000 from the file.
+	if d := got.Findings[0].Decision; d == nil || d.Reason != policy.ReasonBelowThreshold {
+		t.Fatalf("config threshold not applied: %+v", d)
+	}
+	// The command line wins over the file.
+	got, _, _ = runDetectCmd(t, "-file", quietMining, "-config", cfg, "-threshold", "100")
+	if d := got.Findings[0].Decision; d.Action != policy.RecommendContainment {
+		t.Fatalf("flag must override config: %+v", d)
+	}
+	for name, tc := range map[string]struct{ content, want string }{
+		"unknown setting": {`{"treshold": 5}`, `"treshold" is not a setting`},
+		"nested config":   {`{"config": "x"}`, `"config" is not a setting`},
+		"bad value":       {`{"threshold": "lots"}`, "threshold"},
+		"object value":    {`{"threshold": {"a": 1}}`, "must be a string, number or boolean"},
+		"null value":      {`{"threshold": null}`, "must be a string, number or boolean"},
+		"not an object":   {`[1]`, "must be a JSON object"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, code, stderr := runDetectCmd(t, "-file", quietMining, "-config", writeFile(t, "c.json", tc.content))
+			if code != 2 || !strings.Contains(stderr, tc.want) {
+				t.Fatalf("exit %d, stderr %q, want %q", code, stderr, tc.want)
+			}
+		})
+	}
+	if _, code, stderr := runDetectCmd(t, "-file", quietMining, "-config", "/nonexistent/cad.json"); code != 2 || !strings.Contains(stderr, "no such file") {
+		t.Fatalf("missing config: %d %s", code, stderr)
+	}
+}
+
+// Re-running detection over the same events must not re-record findings,
+// or a polling watcher would reset approvals on every poll.
+func TestRunDetectDoesNotReRecordUnchangedFindings(t *testing.T) {
+	as(t, "alice-account")
+	logPath, top, _ := approvalLog(t, "-approvals-required", "1")
+	args := []string{"-file", incidentLog, "-evidence-log", logPath, "-usage", exampleUsage, "-pricing", examplePricing, "-allow-containment", "-approvals-required", "1"}
+	first, _, _ := runDetectCmd(t, args...)
+	if first.EvidenceHead.Records != 2 || first.Findings[0].EvidenceRecord == "" {
+		t.Fatalf("identical rerun must append nothing: %+v", first.EvidenceHead)
+	}
+	if d, code, stderr := decide(t, "approve", "-evidence-log", logPath, "-incident", top, "-principal", ciDeploy,
+		"-action", "deactivate-access-keys", "-expires", "1h", "-operator", "alice", "-reason", "r"); code != 0 || d.Status.State != incident.StateApproved {
+		t.Fatalf("approve: %d %s", code, stderr)
+	}
+	again, _, _ := runDetectCmd(t, args...)
+	if again.EvidenceHead.Records != 3 {
+		t.Fatalf("rerun after approval must append nothing: %+v", again.EvidenceHead)
+	}
+	out, _, _ := runCmd(t, "approvals", "-evidence-log", logPath, "-incident", top)
+	if !strings.Contains(out, `"state": "approved"`) {
+		t.Fatalf("approval must survive an unchanged rerun: %s", out)
+	}
+	// A changed finding (different threshold changes the decision) is recorded and resets the approval.
+	changed, _, _ := runDetectCmd(t, append(args, "-threshold", "1000000")...)
+	// Only the top finding's decision changed; the low-confidence one is identical and is not re-recorded.
+	if changed.EvidenceHead.Records != 4 {
+		t.Fatalf("exactly the changed finding must be recorded: %+v", changed.EvidenceHead)
+	}
+	out, _, _ = runCmd(t, "approvals", "-evidence-log", logPath, "-incident", top)
+	if !strings.Contains(out, `"state": "not_eligible"`) {
+		t.Fatalf("a changed finding must reset the approval: %s", out)
+	}
+}
+
+func TestRunDetectIdentityPivot(t *testing.T) {
+	got, code, stderr := runDetectCmd(t, "-file", pivotLog, "-notify", "slack", "-notify-dry-run")
+	if code != 0 || len(got.Findings) != 1 || got.Findings[0].Confidence != 96 || len(got.Findings[0].LinkedPrincipals) != 1 {
+		t.Fatalf("pivot: %d %+v %s", code, got.Findings, stderr)
+	}
+	if !strings.Contains(string(got.Notifications[0].Payload), "Created identities") {
+		t.Fatalf("alert must name the created identity: %s", got.Notifications[0].Payload)
+	}
+}
+
+func TestRunHostScanNotifyAndEvidence(t *testing.T) {
+	fail := false
+	sent, done := hookServer(t, &fail)
+	defer done()
+	dir := t.TempDir()
+	logPath, state := filepath.Join(dir, "evidence.jsonl"), filepath.Join(dir, "state.json")
+	args := []string{"host-scan", "-file", hostFixtures + "attack_kinsing.json", "-notify", "webhook", "-alert-state", state, "-evidence-log", logPath}
+	scan := func() hostScanOutput {
+		t.Helper()
+		out, code, stderr := runCmd(t, args...)
+		var got hostScanOutput
+		if code != 0 || json.Unmarshal([]byte(out), &got) != nil {
+			t.Fatalf("exit %d %s %s", code, out, stderr)
+		}
+		return got
+	}
+	got := scan()
+	// kdevtmpfsi (88.4) alerts; the idle kinsing dropper (51.0) also clears the default threshold of 50.
+	if *sent != 2 || len(got.Notifications) != 2 || got.Notifications[0].Status != "sent" || got.Findings[0].EvidenceRecord == "" {
+		t.Fatalf("first scan: sent %d %+v", *sent, got.Notifications)
+	}
+	if got.EvidenceHead.Records != 4 { // 2 host findings + 2 notifications
+		t.Fatalf("evidence head: %+v", got.EvidenceHead)
+	}
+	if again := scan(); *sent != 2 || again.Notifications[0].Status != "suppressed_duplicate" {
+		t.Fatalf("second scan must be de-duplicated: sent %d %+v", *sent, again.Notifications)
+	}
+	raw, _ := os.ReadFile(logPath)
+	if !strings.Contains(string(raw), `"kind":"host_finding"`) || strings.Contains(string(raw), "/hook") {
+		t.Fatalf("evidence log content: %s", raw)
+	}
+	// Host records do not disturb the approval view of the same log.
+	if out, code, stderr := runCmd(t, "approvals", "-evidence-log", logPath); code != 0 || strings.TrimSpace(out) != "[]" {
+		t.Fatalf("approvals over host records: %d %s %s", code, out, stderr)
+	}
+	if out, code, _ := runCmd(t, "evidence-verify", "-file", logPath); code != 0 || !strings.Contains(out, `"records"`) {
+		t.Fatalf("verify: %d %s", code, out)
+	}
+	if _, code, stderr := runCmd(t, "host-scan", "-file", hostFixtures+"attack_kinsing.json", "-alert-state", state); code != 2 || !strings.Contains(stderr, "require -notify") {
+		t.Fatalf("state without notify: %d %s", code, stderr)
+	}
+}
+
+func TestRunSignedApprovals(t *testing.T) {
+	dir := t.TempDir()
+	keygen := func(name string) (string, incident.OperatorEntry) {
+		t.Helper()
+		keyPath := filepath.Join(dir, name+".key")
+		out, code, stderr := runCmd(t, "keygen", "-operator", name, "-out", keyPath)
+		var entry incident.OperatorEntry
+		if code != 0 || json.Unmarshal([]byte(out), &entry) != nil || entry.Name != name {
+			t.Fatalf("keygen: %d %s %s", code, out, stderr)
+		}
+		info, err := os.Stat(keyPath)
+		if err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("key file mode: %v %v", info, err)
+		}
+		raw, _ := os.ReadFile(keyPath)
+		var kf incident.KeyFile
+		json.Unmarshal(raw, &kf)
+		if strings.Contains(out, kf.PrivateKey) {
+			t.Fatal("keygen printed the private key")
+		}
+		return keyPath, entry
+	}
+	aliceKey, alice := keygen("alice")
+	bobKey, bob := keygen("bob")
+	eveKey, _ := keygen("eve")
+	if _, code, stderr := runCmd(t, "keygen", "-operator", "alice", "-out", aliceKey); code != 1 || !strings.Contains(stderr, "exists") {
+		t.Fatalf("keygen must not overwrite: %d %s", code, stderr)
+	}
+	opsRaw, _ := json.Marshal(map[string]any{"operators": []incident.OperatorEntry{alice, bob}})
+	ops := filepath.Join(dir, "operators.json")
+	os.WriteFile(ops, opsRaw, 0o600)
+
+	logPath, top, _ := approvalLog(t, "-require-signed-approvals")
+	approve := func(extra ...string) (decisionOutput, int, string) {
+		return decide(t, append([]string{"approve", "-evidence-log", logPath, "-incident", top, "-principal", ciDeploy,
+			"-action", "deactivate-access-keys", "-expires", "2h", "-reason", "confirmed"}, extra...)...)
+	}
+	for name, tc := range map[string]struct {
+		extra []string
+		code  int
+		want  string
+	}{
+		"unsigned":           {[]string{"-operator", "alice", "-operators", ops}, 1, "sign with the operator's key"},
+		"no operators file":  {[]string{"-key", aliceKey}, 1, "not in the trusted operators file"},
+		"untrusted operator": {[]string{"-key", eveKey, "-operators", ops}, 1, "not in the trusted operators file"},
+		"name mismatch":      {[]string{"-key", aliceKey, "-operator", "bob", "-operators", ops}, 2, "does not match the key's operator"},
+		"missing key file":   {[]string{"-key", aliceKey + ".nope", "-operators", ops}, 2, "no such file"},
+		"bad key file":       {[]string{"-key", ops, "-operators", ops}, 2, "key file is not valid"},
+		"bad operators file": {[]string{"-key", aliceKey, "-operators", aliceKey}, 2, "operators file"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, code, stderr := approve(tc.extra...)
+			if code != tc.code || !strings.Contains(stderr, tc.want) {
+				t.Fatalf("exit %d (want %d), stderr %q, want %q", code, tc.code, stderr, tc.want)
+			}
+		})
+	}
+
+	d, code, stderr := approve("-key", aliceKey, "-operators", ops)
+	if code != 0 || d.Status.State != incident.StatePartiallyApproved || d.Status.Approvals[0].Signature == "" || d.Status.Approvals[0].Operator != "alice" {
+		t.Fatalf("alice: %d %+v %s", code, d.Status, stderr)
+	}
+	d, code, stderr = approve("-key", bobKey, "-operators", ops)
+	if code != 0 || d.Status.State != incident.StateApproved {
+		t.Fatalf("bob: %d %+v %s", code, d.Status, stderr)
+	}
+	// Viewing without the operators file shows the approvals as unverified.
+	out, _, _ := runCmd(t, "approvals", "-evidence-log", logPath, "-incident", top)
+	if !strings.Contains(out, `"state": "pending"`) || !strings.Contains(out, `"unverified_approvals": 2`) {
+		t.Fatalf("without operators: %s", out)
+	}
+	out, _, _ = runCmd(t, "approvals", "-evidence-log", logPath, "-incident", top, "-operators", ops)
+	if !strings.Contains(out, `"state": "approved"`) {
+		t.Fatalf("with operators: %s", out)
+	}
+	// One operator can still revoke without a key.
+	if d, code, stderr := decide(t, "revoke", "-evidence-log", logPath, "-incident", top, "-operator", "carol", "-reason", "stop", "-operators", ops); code != 0 || d.Status.State != incident.StateRevoked {
+		t.Fatalf("revoke: %d %+v %s", code, d.Status, stderr)
+	}
+	if _, code, stderr := runCmd(t, "keygen", "-operator", "x"); code != 2 || !strings.Contains(stderr, "are required") {
+		t.Fatalf("keygen flags: %d %s", code, stderr)
+	}
+	if _, code, stderr := runDetectCmd(t, "-file", incidentLog, "-require-signed-approvals"); code != 2 || !strings.Contains(stderr, "require -evidence-log") {
+		t.Fatalf("signed without log: %d %s", code, stderr)
 	}
 }

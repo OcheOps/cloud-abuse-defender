@@ -1,43 +1,25 @@
-// Command cad runs local, offline simulations and prints JSON. It never calls
-// cloud APIs or changes infrastructure.
-//
-//	cad [flags]                      evaluate the policy for one confidence and spend rate
-//	cad cloudtrail -file <log>       replay a CloudTrail log into redacted events with indicators
-//	cad detect -file <log> [flags]   correlate a CloudTrail log into scored findings and,
-//	                                 given a cost source, a policy decision per finding;
-//	                                 -notify slack|webhook sends alerts to $CAD_WEBHOOK_URL
-//	cad bedrock-queries -models a,b  write CloudWatch queries for Bedrock token metrics
-//	cad bedrock-usage -results <f>   convert "aws cloudwatch get-metric-data" output to a usage file
-//	cad evidence-verify -file <log>  verify a tamper-evident evidence log
-//	cad approvals -evidence-log <f>  show each incident's containment approval state
-//	cad approve|reject|revoke ...    record an operator decision (never executes anything)
-//	cad host-snapshot                read-only snapshot of local processes and connections (Linux)
-//	cad host-scan -file <snapshot>   score a host snapshot for cryptomining indicators
-//
-// The hourly spend comes either from -hourly-rate, or from a Bedrock usage
-// observation priced with a versioned table (-usage and -pricing).
+// Command cad runs local, offline analysis and prints JSON. It never calls
+// cloud APIs or changes infrastructure. Run "cad help" for the command list.
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
-	"os/user"
+	"runtime"
+	"runtime/debug"
+	"sort"
 	"strings"
 	"time"
 
-	"github.com/OcheOps/cloud-abuse-defender/internal/alert"
 	"github.com/OcheOps/cloud-abuse-defender/internal/cloudtrail"
 	"github.com/OcheOps/cloud-abuse-defender/internal/cloudwatch"
 	"github.com/OcheOps/cloud-abuse-defender/internal/cost"
 	"github.com/OcheOps/cloud-abuse-defender/internal/detect"
 	"github.com/OcheOps/cloud-abuse-defender/internal/evidence"
 	"github.com/OcheOps/cloud-abuse-defender/internal/host"
-	"github.com/OcheOps/cloud-abuse-defender/internal/incident"
 	"github.com/OcheOps/cloud-abuse-defender/internal/policy"
 )
 
@@ -45,9 +27,72 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, time.Now()))
 }
 
+// version is set at build time with -ldflags "-X main.version=v1.2.3".
+var version = "dev"
+
+const helpText = `cad - cost-aware cloud abuse detection. Reads files, prints JSON, changes nothing.
+
+Usage: cad <command> [flags]      (run "cad <command> -h" for a command's flags)
+
+Detect
+  detect            correlate a CloudTrail log into scored findings, with cost,
+                    policy decision, alerts and evidence records
+  cloudtrail        replay a CloudTrail log into redacted events with indicators
+  host-snapshot     read-only snapshot of local processes and connections (Linux)
+  host-scan         score a host snapshot for cryptomining indicators
+  policy            evaluate the policy for one confidence and spend rate
+                    (also the default when no command is given)
+
+Cost inputs
+  bedrock-queries   write CloudWatch queries for Bedrock token metrics
+  bedrock-usage     convert "aws cloudwatch get-metric-data" output to a usage file
+
+Evidence and approvals
+  evidence-verify   verify a tamper-evident evidence log
+  approvals         show each incident's containment approval state
+  approve, reject, revoke
+                    record an operator decision (never executes anything)
+  keygen            create an operator signing key for signed approvals
+
+Other
+  version           print version information
+  help              show this text
+`
+
+type versionOutput struct {
+	Version            string `json:"version"`
+	Commit             string `json:"commit,omitempty"`
+	Go                 string `json:"go"`
+	PolicyVersion      string `json:"policy_version"`
+	WeightsVersion     string `json:"weights_version"`
+	HostWeightsVersion string `json:"host_weights_version"`
+}
+
+func runVersion(stdout, stderr io.Writer) int {
+	out := versionOutput{Version: version, Go: runtime.Version(), PolicyVersion: policy.Version,
+		WeightsVersion: detect.WeightsVersion, HostWeightsVersion: host.WeightsVersion}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, kv := range info.Settings {
+			if kv.Key == "vcs.revision" {
+				out.Commit = kv.Value
+			}
+		}
+	}
+	return encode(stdout, stderr, out)
+}
+
 func run(args []string, stdout, stderr io.Writer, now time.Time) int {
 	if len(args) > 0 {
 		switch args[0] {
+		case "help", "-h", "-help", "--help":
+			fmt.Fprint(stdout, helpText)
+			return 0
+		case "version", "-version", "--version":
+			return runVersion(stdout, stderr)
+		case "policy":
+			return runPolicy(args[1:], stdout, stderr, now)
+		case "keygen":
+			return runKeygen(args[1:], stdout, stderr)
 		case "cloudtrail":
 			return runCloudTrail(args[1:], stdout, stderr)
 		case "detect":
@@ -65,7 +110,11 @@ func run(args []string, stdout, stderr io.Writer, now time.Time) int {
 		case "host-snapshot":
 			return runHostSnapshot(args[1:], stdout, stderr, now)
 		case "host-scan":
-			return runHostScan(args[1:], stdout, stderr)
+			return runHostScan(args[1:], stdout, stderr, now)
+		}
+		if !strings.HasPrefix(args[0], "-") {
+			fmt.Fprintf(stderr, "unknown command %q; run \"cad help\" for the list\n", args[0])
+			return 2
 		}
 	}
 	return runPolicy(args, stdout, stderr, now)
@@ -86,7 +135,69 @@ func parseFlags(fs *flag.FlagSet, args []string, stderr io.Writer) (set map[stri
 	}
 	set = map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if cfg := fs.Lookup(configFlag); cfg != nil && cfg.Value.String() != "" {
+		if err := applyConfig(fs, cfg.Value.String(), set); err != nil {
+			fmt.Fprintln(stderr, err)
+			return nil, false
+		}
+	}
 	return set, true
+}
+
+const (
+	configFlag     = "config"
+	maxConfigBytes = 1 << 20
+)
+
+func addConfigFlag(fs *flag.FlagSet) {
+	fs.String(configFlag, "", "JSON file of flag values, for example {\"notify\": \"slack\", \"window\": \"2h\"}; flags on the command line win")
+}
+
+// applyConfig sets every flag named in the config file that was not given on
+// the command line. Unknown names are errors, so a typo cannot silently
+// leave a safety setting at its default.
+func applyConfig(fs *flag.FlagSet, path string, set map[string]bool) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if len(raw) > maxConfigBytes {
+		return fmt.Errorf("%s: config file is too large", path)
+	}
+	var values map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return fmt.Errorf("%s: config must be a JSON object of flag names to values: %v", path, err)
+	}
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if name == configFlag || fs.Lookup(name) == nil {
+			return fmt.Errorf("%s: %q is not a setting of this command", path, name)
+		}
+		if set[name] {
+			continue
+		}
+		var value string
+		v := values[name]
+		switch {
+		case len(v) > 0 && v[0] == '"':
+			if err := json.Unmarshal(v, &value); err != nil {
+				return fmt.Errorf("%s: %s: %v", path, name, err)
+			}
+		case len(v) > 0 && v[0] != '{' && v[0] != '[' && string(v) != "null":
+			value = string(v) // number or boolean
+		default:
+			return fmt.Errorf("%s: %s must be a string, number or boolean", path, name)
+		}
+		if err := fs.Set(name, value); err != nil {
+			return fmt.Errorf("%s: %s: %v", path, name, err)
+		}
+		set[name] = true
+	}
+	return nil
 }
 
 // costFlags are the policy and spend-rate flags shared by the policy and detect commands.
@@ -149,6 +260,7 @@ func runPolicy(args []string, stdout, stderr io.Writer, now time.Time) int {
 	fs := flag.NewFlagSet("cad", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	cf := registerCostFlags(fs)
+	addConfigFlag(fs)
 	confidence := fs.Float64("confidence", 90, "threat confidence between 0 and 100")
 	set, ok := parseFlags(fs, args, stderr)
 	if !ok {
@@ -200,425 +312,6 @@ func runCloudTrail(args []string, stdout, stderr io.Writer) int {
 			if len(ev.Indicators) > 0 {
 				out.Events = append(out.Events, ev)
 			}
-		}
-	}
-	return encode(stdout, stderr, out)
-}
-
-type detectedFinding struct {
-	IncidentID string `json:"incident_id"`
-	detect.Finding
-	// Decision is present only when a cost source was given.
-	Decision *policy.Decision `json:"decision,omitempty"`
-}
-
-// webhookEnv names the environment variable holding the webhook URL. The URL
-// is a secret, so it is never accepted as a flag (flags leak into shell
-// history and process listings) and never printed.
-const webhookEnv = "CAD_WEBHOOK_URL"
-
-// httpClient is used for alert delivery; tests replace it.
-var httpClient = &http.Client{Timeout: 10 * time.Second}
-
-type notification struct {
-	Principal string    `json:"principal"`
-	First     time.Time `json:"first_event_time"`
-	// Status is "sent", "failed", "dry_run", "skipped_below_threshold" or
-	// "suppressed_duplicate".
-	Status string `json:"status"`
-	// Verdict is the de-duplication verdict ("new", "escalated", "reminder",
-	// "duplicate") when -alert-state is set.
-	Verdict alert.Verdict   `json:"verdict,omitempty"`
-	Error   string          `json:"error,omitempty"`
-	Payload json.RawMessage `json:"payload,omitempty"`
-}
-
-type detectOutput struct {
-	Findings      []detectedFinding `json:"findings"`
-	Estimate      *cost.Estimate    `json:"estimate,omitempty"`
-	Notifications []notification    `json:"notifications,omitempty"`
-	// EvidenceHead is the end of the evidence chain after this run.
-	EvidenceHead *evidence.Head `json:"evidence_head,omitempty"`
-}
-
-func runDetect(args []string, stdout, stderr io.Writer, now time.Time) int {
-	fs := flag.NewFlagSet("cad detect", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	path := fs.String("file", "", "CloudTrail log file (S3 delivery format, .json or .json.gz); required")
-	window := fs.Duration("window", detect.DefaultWindow, "largest gap between a principal's indicator events within one finding")
-	notify := fs.String("notify", "", `send alerts as "slack" or "webhook" to $`+webhookEnv)
-	notifyMin := fs.Float64("notify-min-confidence", 50, "only alert on findings at or above this confidence")
-	dryRun := fs.Bool("notify-dry-run", false, "render alert payloads into the output instead of sending them")
-	statePath := fs.String("alert-state", "", "state file of delivered alerts; enables de-duplication (created if missing, never written on dry runs)")
-	suppressFor := fs.Duration("alert-suppress-for", 24*time.Hour, "with -alert-state, re-send an unchanged alert only after this long")
-	evidencePath := fs.String("evidence-log", "", "append a tamper-evident record of each finding and delivered alert to this file")
-	approvalsRequired := fs.Int("approvals-required", incident.DefaultRequiredApprovals, "distinct operators who must approve containment for findings recorded in this run (1-5)")
-	cf := registerCostFlags(fs)
-	set, ok := parseFlags(fs, args, stderr)
-	if !ok {
-		return 2
-	}
-	if *path == "" {
-		fmt.Fprintln(stderr, "-file is required")
-		return 2
-	}
-	var sender *alert.Sender
-	switch {
-	case *notify == "" && (*dryRun || set["notify-min-confidence"] || *statePath != "" || set["alert-suppress-for"]):
-		fmt.Fprintln(stderr, "-notify-dry-run, -notify-min-confidence, -alert-state and -alert-suppress-for require -notify")
-		return 2
-	case set["alert-suppress-for"] && *statePath == "":
-		fmt.Fprintln(stderr, "-alert-suppress-for requires -alert-state")
-		return 2
-	case *suppressFor < 0:
-		fmt.Fprintln(stderr, "-alert-suppress-for must not be negative")
-		return 2
-	case set["approvals-required"] && *evidencePath == "":
-		fmt.Fprintln(stderr, "-approvals-required requires -evidence-log")
-		return 2
-	case *approvalsRequired < 1 || *approvalsRequired > incident.MaxRequiredApprovals:
-		fmt.Fprintf(stderr, "-approvals-required must be between 1 and %d\n", incident.MaxRequiredApprovals)
-		return 2
-	case *notify != "":
-		format, err := alert.ParseFormat(*notify)
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 2
-		}
-		if *notifyMin < 0 || *notifyMin > 100 {
-			fmt.Fprintln(stderr, "-notify-min-confidence must be between 0 and 100")
-			return 2
-		}
-		sender = &alert.Sender{Format: format, Client: httpClient}
-		if !*dryRun {
-			sender.URL = os.Getenv(webhookEnv)
-			if sender.URL == "" {
-				fmt.Fprintf(stderr, "-notify requires $%s (or use -notify-dry-run)\n", webhookEnv)
-				return 2
-			}
-			if err := sender.Validate(); err != nil {
-				fmt.Fprintln(stderr, err)
-				return 2
-			}
-		}
-	}
-	in, est, err := cf.resolve(set, now)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 2
-	}
-	// Decisions need a real spend figure: the -hourly-rate default is a
-	// simulation placeholder, so it is only used when given explicitly.
-	decide := est != nil || set["hourly-rate"]
-
-	events, err := loadFile(*path, cloudtrail.Replay)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 2
-	}
-	findings, err := detect.Detect(events, detect.Options{Window: *window})
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 2
-	}
-	out := detectOutput{Findings: make([]detectedFinding, 0, len(findings)), Estimate: est}
-	for _, f := range findings {
-		df := detectedFinding{Finding: f}
-		if decide {
-			fin := in
-			fin.ThreatConfidence = f.Confidence
-			d, err := policy.Evaluate(fin)
-			if err != nil {
-				fmt.Fprintln(stderr, err)
-				return 2
-			}
-			df.Decision = &d
-		}
-		df.IncidentID = f.IncidentID()
-		out.Findings = append(out.Findings, df)
-	}
-
-	// Evidence is written before any alert goes out, so every alert can
-	// point at the record that explains it.
-	var evLog *evidence.Log
-	recordHash := make([]string, len(out.Findings))
-	if *evidencePath != "" {
-		if evLog, err = evidence.Open(*evidencePath); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 2
-		}
-		defer evLog.Close()
-		for i, df := range out.Findings {
-			ev := incident.FindingData{Finding: df.Finding, Decision: df.Decision, PolicyVersion: policy.Version, WeightsVersion: detect.WeightsVersion, ApprovalsRequired: *approvalsRequired}
-			if est != nil {
-				ev.PricingVersion, ev.HourlyCostUSD, ev.ForecastWarnings = est.PricingVersion, est.HourlyCostUSD, est.Warnings
-			}
-			rec, err := evLog.Append(incident.KindFinding, df.IncidentID, ev, now)
-			if err != nil {
-				fmt.Fprintln(stderr, err)
-				return 1
-			}
-			recordHash[i] = rec.Hash
-		}
-	}
-
-	var state *alert.State
-	if sender != nil && *statePath != "" {
-		if state, err = alert.LoadState(*statePath); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 2
-		}
-	}
-
-	code := 0
-	stateChanged := false
-	if sender != nil {
-		for i, df := range out.Findings {
-			n := notification{Principal: df.Principal, First: df.First}
-			a := alert.FromFinding(df.Finding, df.Decision, est, now)
-			a.EvidenceHash = recordHash[i]
-			if state != nil && df.Confidence >= *notifyMin {
-				n.Verdict = state.Check(a, *window, *suppressFor, now)
-				if n.Verdict == alert.VerdictEscalated || n.Verdict == alert.VerdictReminder {
-					a.Update = string(n.Verdict)
-				}
-			}
-			switch {
-			case df.Confidence < *notifyMin:
-				n.Status = "skipped_below_threshold"
-			case n.Verdict == alert.VerdictDuplicate:
-				n.Status = "suppressed_duplicate"
-			case *dryRun:
-				payload, err := alert.Render(sender.Format, a)
-				if err != nil {
-					fmt.Fprintln(stderr, err)
-					return 1
-				}
-				n.Status, n.Payload = "dry_run", payload
-			default:
-				ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-				err := sender.Send(ctx, a)
-				cancel()
-				if err != nil {
-					n.Status, n.Error = "failed", err.Error()
-					code = 1
-				} else {
-					n.Status = "sent"
-					// Only delivered alerts are recorded, so a failed send is retried next run.
-					if state != nil {
-						state.Record(a, *window, now)
-						stateChanged = true
-					}
-				}
-			}
-			out.Notifications = append(out.Notifications, n)
-			// Dry runs and skipped findings deliver nothing, so there is nothing to record.
-			if evLog != nil && (n.Status == "sent" || n.Status == "failed" || n.Status == "suppressed_duplicate") {
-				ne := incident.NotificationData{Format: sender.Format, Status: n.Status, Verdict: n.Verdict, Error: n.Error, FindingRecord: recordHash[i]}
-				if _, err := evLog.Append(incident.KindNotification, df.IncidentID, ne, now); err != nil {
-					fmt.Fprintln(stderr, err)
-					code = 1
-				}
-			}
-		}
-	}
-	if evLog != nil {
-		head := evLog.Head()
-		out.EvidenceHead = &head
-	}
-	if stateChanged {
-		if err := state.Save(*statePath, now); err != nil {
-			fmt.Fprintln(stderr, err)
-			code = 1
-		}
-	}
-	// Findings are always printed; a failed delivery is reported in the
-	// output and the exit status rather than hiding the detection result.
-	if c := encode(stdout, stderr, out); c != 0 {
-		return c
-	}
-	if code != 0 {
-		fmt.Fprintln(stderr, "one or more alerts could not be delivered")
-	}
-	return code
-}
-
-func runApprovals(args []string, stdout, stderr io.Writer, now time.Time) int {
-	fs := flag.NewFlagSet("cad approvals", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	path := fs.String("evidence-log", "", "evidence log written by 'cad detect -evidence-log'; required")
-	id := fs.String("incident", "", "show only this incident")
-	if _, ok := parseFlags(fs, args, stderr); !ok {
-		return 2
-	}
-	if *path == "" {
-		fmt.Fprintln(stderr, "-evidence-log is required")
-		return 2
-	}
-	records, _, err := evidence.ReadFile(*path)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	if *id != "" {
-		s, err := incident.StatusOf(records, *id, now)
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		return encode(stdout, stderr, s)
-	}
-	all, err := incident.Summarize(records, now)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	return encode(stdout, stderr, all)
-}
-
-// localAccount is the OS account running the command, recorded next to the
-// self-declared operator name.
-var localAccount = func() string {
-	if u, err := user.Current(); err == nil {
-		return u.Username
-	}
-	return ""
-}
-
-type decisionOutput struct {
-	Record evidence.Record `json:"record"`
-	Status incident.Status `json:"status"`
-}
-
-// runDecision records an approval, rejection or revocation. Nothing is executed.
-func runDecision(kind string, args []string, stdout, stderr io.Writer, now time.Time) int {
-	fs := flag.NewFlagSet("cad "+kind, flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	path := fs.String("evidence-log", "", "evidence log written by 'cad detect -evidence-log'; required")
-	id := fs.String("incident", "", "incident ID; required")
-	operator := fs.String("operator", "", "name of the operator making the decision; required")
-	reason := fs.String("reason", "", "why; required")
-	var principal, action *string
-	var ttl *time.Duration
-	if kind == "approve" {
-		principal = fs.String("principal", "", "the incident's principal ARN, typed out to confirm the target; required")
-		action = fs.String("action", "", "reversible action to authorise: deactivate-access-keys or attach-deny-all-policy; required")
-		ttl = fs.Duration("expires", 0, "how long the approval stays valid (at most 24h); required")
-	}
-	if _, ok := parseFlags(fs, args, stderr); !ok {
-		return 2
-	}
-	if *path == "" || *id == "" {
-		fmt.Fprintln(stderr, "-evidence-log and -incident are required")
-		return 2
-	}
-	records, head, err := evidence.ReadFile(*path)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	d := incident.Decider{Operator: *operator, RecordedBy: localAccount(), Reason: *reason}
-
-	var recordKind string
-	var data any
-	switch kind {
-	case "approve":
-		act, perr := incident.ParseAction(*action)
-		if perr != nil {
-			fmt.Fprintln(stderr, perr)
-			return 2
-		}
-		recordKind = incident.KindApproval
-		data, err = incident.Approve(records, incident.ApproveRequest{Decider: d, IncidentID: *id, Principal: *principal, Action: act, TTL: *ttl}, now)
-	case "reject":
-		recordKind = incident.KindRejection
-		data, err = incident.Reject(records, *id, d, now)
-	default:
-		recordKind = incident.KindRevocation
-		data, err = incident.Revoke(records, *id, d, now)
-	}
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-
-	log, err := evidence.Open(*path)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	defer log.Close()
-	// The decision was validated against the log as read above; refuse if
-	// another writer appended in between.
-	if log.Head() != head {
-		fmt.Fprintln(stderr, "evidence log changed while the decision was being checked; run the command again")
-		return 1
-	}
-	rec, err := log.Append(recordKind, *id, data, now)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	status, err := incident.StatusOf(append(records, rec), *id, now)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	return encode(stdout, stderr, decisionOutput{Record: rec, Status: status})
-}
-
-// hostname is recorded in snapshots; tests replace it.
-var hostname = os.Hostname
-
-func runHostSnapshot(args []string, stdout, stderr io.Writer, now time.Time) int {
-	fs := flag.NewFlagSet("cad host-snapshot", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	sample := fs.Duration("sample", 2*time.Second, "CPU sampling interval (0 records no CPU use)")
-	procRoot := fs.String("proc", "/proc", "proc filesystem to read")
-	if _, ok := parseFlags(fs, args, stderr); !ok {
-		return 2
-	}
-	name, _ := hostname()
-	snap, err := host.Collect(host.CollectOptions{ProcRoot: *procRoot, Hostname: name, Now: now, Sample: *sample})
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 2
-	}
-	return encode(stdout, stderr, snap)
-}
-
-type hostScanOutput struct {
-	Host           string         `json:"host"`
-	CollectedAt    time.Time      `json:"collected_at"`
-	WeightsVersion string         `json:"weights_version"`
-	Findings       []host.Finding `json:"findings"`
-}
-
-func runHostScan(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("cad host-scan", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	path := fs.String("file", "", "snapshot from 'cad host-snapshot'; required")
-	minConf := fs.Float64("min-confidence", 0, "only report findings at or above this confidence")
-	if _, ok := parseFlags(fs, args, stderr); !ok {
-		return 2
-	}
-	if *path == "" {
-		fmt.Fprintln(stderr, "-file is required")
-		return 2
-	}
-	if *minConf < 0 || *minConf > 100 {
-		fmt.Fprintln(stderr, "-min-confidence must be between 0 and 100")
-		return 2
-	}
-	snap, err := loadFile(*path, host.Load)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 2
-	}
-	out := hostScanOutput{Host: snap.Host, CollectedAt: snap.CollectedAt, WeightsVersion: host.WeightsVersion, Findings: []host.Finding{}}
-	for _, f := range host.Scan(snap) {
-		if f.Confidence >= *minConf {
-			out.Findings = append(out.Findings, f)
 		}
 	}
 	return encode(stdout, stderr, out)
