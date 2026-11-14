@@ -1,0 +1,54 @@
+{
+  "host": "app-07",
+  "collected_at": "2026-11-07T10:00:00Z",
+  "sample_seconds": 2,
+  "processes": [
+    {
+      "pid": 1,
+      "ppid": 0,
+      "uid": 0,
+      "name": "systemd",
+      "exe": "/usr/lib/systemd/systemd",
+      "cmdline": [
+        "/sbin/init"
+      ],
+      "cpu_percent": 0.1
+    },
+    {
+      "pid": 812,
+      "ppid": 1,
+      "uid": 0,
+      "name": "sshd",
+      "exe": "/usr/sbin/sshd",
+      "cmdline": [
+        "sshd: /usr/sbin/sshd -D [listener]"
+      ],
+      "cpu_percent": 0.0
+    },
+    {
+      "pid": 5101,
+      "ppid": 1,
+      "uid": 1000,
+      "name": "kworkerds",
+      "exe": "/dev/shm/.kworkerds",
+      "cmdline": [
+        "/dev/shm/.kworkerds",
+        "-o",
+        "pool.supportxmr.com:443",
+        "-u",
+        "48WalletExample",
+        "--donate-level=1",
+        "--cpu-max-threads-hint=90"
+      ],
+      "cpu_percent": 380.0
+    }
+  ],
+  "connections": [
+    {
+      "pid": 5101,
+      "remote_ip": "203.0.113.88",
+      "remote_port": 443,
+      "state": "established"
+    }
+  ]
+}

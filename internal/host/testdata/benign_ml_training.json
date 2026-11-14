@@ -1,0 +1,53 @@
+{
+  "host": "gpu-01",
+  "collected_at": "2026-11-07T10:00:00Z",
+  "sample_seconds": 2,
+  "processes": [
+    {
+      "pid": 1,
+      "ppid": 0,
+      "uid": 0,
+      "name": "systemd",
+      "exe": "/usr/lib/systemd/systemd",
+      "cmdline": [
+        "/sbin/init"
+      ],
+      "cpu_percent": 0.1
+    },
+    {
+      "pid": 812,
+      "ppid": 1,
+      "uid": 0,
+      "name": "sshd",
+      "exe": "/usr/sbin/sshd",
+      "cmdline": [
+        "sshd: /usr/sbin/sshd -D [listener]"
+      ],
+      "cpu_percent": 0.0
+    },
+    {
+      "pid": 2201,
+      "ppid": 1,
+      "uid": 1000,
+      "name": "python3",
+      "exe": "/usr/bin/python3.11",
+      "cmdline": [
+        "python3",
+        "train.py",
+        "--epochs",
+        "40",
+        "--batch-size",
+        "256"
+      ],
+      "cpu_percent": 780.0
+    }
+  ],
+  "connections": [
+    {
+      "pid": 2201,
+      "remote_ip": "198.51.100.40",
+      "remote_port": 443,
+      "state": "established"
+    }
+  ]
+}

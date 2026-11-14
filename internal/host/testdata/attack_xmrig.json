@@ -1,0 +1,58 @@
+{
+  "host": "web-02",
+  "collected_at": "2026-11-07T10:00:00Z",
+  "sample_seconds": 2,
+  "processes": [
+    {
+      "pid": 1,
+      "ppid": 0,
+      "uid": 0,
+      "name": "systemd",
+      "exe": "/usr/lib/systemd/systemd",
+      "cmdline": [
+        "/sbin/init"
+      ],
+      "cpu_percent": 0.1
+    },
+    {
+      "pid": 812,
+      "ppid": 1,
+      "uid": 0,
+      "name": "sshd",
+      "exe": "/usr/sbin/sshd",
+      "cmdline": [
+        "sshd: /usr/sbin/sshd -D [listener]"
+      ],
+      "cpu_percent": 0.0
+    },
+    {
+      "pid": 4401,
+      "ppid": 1,
+      "uid": 33,
+      "name": "xmrig",
+      "exe": "/tmp/.x/xmrig (deleted)",
+      "cmdline": [
+        "/tmp/.x/xmrig",
+        "-o",
+        "stratum+tcp://203.0.113.77:3333",
+        "-u",
+        "48WalletExample",
+        "-p",
+        "x",
+        "--donate-level",
+        "1",
+        "-a",
+        "rx/0"
+      ],
+      "cpu_percent": 395.0
+    }
+  ],
+  "connections": [
+    {
+      "pid": 4401,
+      "remote_ip": "203.0.113.77",
+      "remote_port": 3333,
+      "state": "established"
+    }
+  ]
+}

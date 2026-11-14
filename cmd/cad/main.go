@@ -11,6 +11,8 @@
 //	cad evidence-verify -file <log>  verify a tamper-evident evidence log
 //	cad approvals -evidence-log <f>  show each incident's containment approval state
 //	cad approve|reject|revoke ...    record an operator decision (never executes anything)
+//	cad host-snapshot                read-only snapshot of local processes and connections (Linux)
+//	cad host-scan -file <snapshot>   score a host snapshot for cryptomining indicators
 //
 // The hourly spend comes either from -hourly-rate, or from a Bedrock usage
 // observation priced with a versioned table (-usage and -pricing).
@@ -34,6 +36,7 @@ import (
 	"github.com/OcheOps/cloud-abuse-defender/internal/cost"
 	"github.com/OcheOps/cloud-abuse-defender/internal/detect"
 	"github.com/OcheOps/cloud-abuse-defender/internal/evidence"
+	"github.com/OcheOps/cloud-abuse-defender/internal/host"
 	"github.com/OcheOps/cloud-abuse-defender/internal/incident"
 	"github.com/OcheOps/cloud-abuse-defender/internal/policy"
 )
@@ -59,6 +62,10 @@ func run(args []string, stdout, stderr io.Writer, now time.Time) int {
 			return runApprovals(args[1:], stdout, stderr, now)
 		case "approve", "reject", "revoke":
 			return runDecision(args[0], args[1:], stdout, stderr, now)
+		case "host-snapshot":
+			return runHostSnapshot(args[1:], stdout, stderr, now)
+		case "host-scan":
+			return runHostScan(args[1:], stdout, stderr)
 		}
 	}
 	return runPolicy(args, stdout, stderr, now)
@@ -558,6 +565,63 @@ func runDecision(kind string, args []string, stdout, stderr io.Writer, now time.
 		return 1
 	}
 	return encode(stdout, stderr, decisionOutput{Record: rec, Status: status})
+}
+
+// hostname is recorded in snapshots; tests replace it.
+var hostname = os.Hostname
+
+func runHostSnapshot(args []string, stdout, stderr io.Writer, now time.Time) int {
+	fs := flag.NewFlagSet("cad host-snapshot", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	sample := fs.Duration("sample", 2*time.Second, "CPU sampling interval (0 records no CPU use)")
+	procRoot := fs.String("proc", "/proc", "proc filesystem to read")
+	if _, ok := parseFlags(fs, args, stderr); !ok {
+		return 2
+	}
+	name, _ := hostname()
+	snap, err := host.Collect(host.CollectOptions{ProcRoot: *procRoot, Hostname: name, Now: now, Sample: *sample})
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	return encode(stdout, stderr, snap)
+}
+
+type hostScanOutput struct {
+	Host           string         `json:"host"`
+	CollectedAt    time.Time      `json:"collected_at"`
+	WeightsVersion string         `json:"weights_version"`
+	Findings       []host.Finding `json:"findings"`
+}
+
+func runHostScan(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("cad host-scan", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	path := fs.String("file", "", "snapshot from 'cad host-snapshot'; required")
+	minConf := fs.Float64("min-confidence", 0, "only report findings at or above this confidence")
+	if _, ok := parseFlags(fs, args, stderr); !ok {
+		return 2
+	}
+	if *path == "" {
+		fmt.Fprintln(stderr, "-file is required")
+		return 2
+	}
+	if *minConf < 0 || *minConf > 100 {
+		fmt.Fprintln(stderr, "-min-confidence must be between 0 and 100")
+		return 2
+	}
+	snap, err := loadFile(*path, host.Load)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	out := hostScanOutput{Host: snap.Host, CollectedAt: snap.CollectedAt, WeightsVersion: host.WeightsVersion, Findings: []host.Finding{}}
+	for _, f := range host.Scan(snap) {
+		if f.Confidence >= *minConf {
+			out.Findings = append(out.Findings, f)
+		}
+	}
+	return encode(stdout, stderr, out)
 }
 
 func runEvidenceVerify(args []string, stdout, stderr io.Writer) int {

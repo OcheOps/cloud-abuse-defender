@@ -34,6 +34,9 @@ scoped response executor (future, disabled by default)
 ## CloudWatch metrics
 `internal/cloudwatch` generates GetMetricData queries for Bedrock `InputTokenCount`/`OutputTokenCount` (Sum, per `ModelId`) and converts the AWS CLI's results into a `cost.Usage`. Fetching stays with the operator's AWS CLI and credentials, so this project still holds no cloud keys. The model ID travels in each query's label, results must be `Complete` and inside the requested window, and anything ambiguous is rejected rather than estimated.
 
+## Host snapshots
+`internal/host` reads `/proc` (processes, CPU over a sample, owned TCP connections) without changing anything, masks secret-looking command-line values at collection time, and scores processes with weighted miner indicators. It shares the detector's noisy-OR scoring and version-fingerprint discipline but is a separate stage for now: host findings are not yet fed into alerts or the evidence log.
+
 ## Detector
 `internal/detect` groups indicator events by principal (ARN, else masked access key) and splits them into findings at gaps longer than the correlation window. Confidence is a noisy-OR over distinct indicator weights plus attack-chain rules, so the score is bounded below 100, repeating a signal can't inflate it, and every point traces to named contributors and event IDs. The detector supplies `ThreatConfidence` to the policy engine; it never decides on containment itself.
 
