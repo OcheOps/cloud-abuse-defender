@@ -1,0 +1,274 @@
+{
+  "Records": [
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLESUPPORT",
+        "arn": "arn:aws:iam::123456789012:user/support-tool",
+        "accountId": "123456789012",
+        "accessKeyId": "AKIAEXAMPLESUPPORTT1",
+        "userName": "support-tool"
+      },
+      "eventTime": "2026-11-12T04:00:00Z",
+      "eventSource": "sts.amazonaws.com",
+      "eventName": "GetCallerIdentity",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.120",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": null,
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000001",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLESUPPORT",
+        "arn": "arn:aws:iam::123456789012:user/support-tool",
+        "accountId": "123456789012",
+        "accessKeyId": "AKIAEXAMPLESUPPORTT1",
+        "userName": "support-tool"
+      },
+      "eventTime": "2026-11-12T04:01:00Z",
+      "eventSource": "iam.amazonaws.com",
+      "eventName": "CreateUser",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.120",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": {
+        "userName": "svc-metrics"
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000002",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLESUPPORT",
+        "arn": "arn:aws:iam::123456789012:user/support-tool",
+        "accountId": "123456789012",
+        "accessKeyId": "AKIAEXAMPLESUPPORTT1",
+        "userName": "support-tool"
+      },
+      "eventTime": "2026-11-12T04:01:30Z",
+      "eventSource": "iam.amazonaws.com",
+      "eventName": "AttachUserPolicy",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.120",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": {
+        "userName": "svc-metrics",
+        "policyArn": "arn:aws:iam::aws:policy/AdministratorAccess"
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000003",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLESUPPORT",
+        "arn": "arn:aws:iam::123456789012:user/support-tool",
+        "accountId": "123456789012",
+        "accessKeyId": "AKIAEXAMPLESUPPORTT1",
+        "userName": "support-tool"
+      },
+      "eventTime": "2026-11-12T04:02:00Z",
+      "eventSource": "iam.amazonaws.com",
+      "eventName": "CreateAccessKey",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.120",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": {
+        "userName": "svc-metrics"
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000004",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLESVCMETR",
+        "arn": "arn:aws:iam::123456789012:user/svc-metrics",
+        "accountId": "123456789012",
+        "accessKeyId": "AKIAEXAMPLESVCMETRC1",
+        "userName": "svc-metrics"
+      },
+      "eventTime": "2026-11-12T04:10:00Z",
+      "eventSource": "sts.amazonaws.com",
+      "eventName": "GetCallerIdentity",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.120",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": null,
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000005",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLESVCMETR",
+        "arn": "arn:aws:iam::123456789012:user/svc-metrics",
+        "accountId": "123456789012",
+        "accessKeyId": "AKIAEXAMPLESVCMETRC1",
+        "userName": "svc-metrics"
+      },
+      "eventTime": "2026-11-12T04:11:00Z",
+      "eventSource": "cloudtrail.amazonaws.com",
+      "eventName": "StopLogging",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.120",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": {
+        "name": "org-trail"
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000006",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLESVCMETR",
+        "arn": "arn:aws:iam::123456789012:user/svc-metrics",
+        "accountId": "123456789012",
+        "accessKeyId": "AKIAEXAMPLESVCMETRC1",
+        "userName": "svc-metrics"
+      },
+      "eventTime": "2026-11-12T04:12:00Z",
+      "eventSource": "ecs.amazonaws.com",
+      "eventName": "RunTask",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.120",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": {
+        "cluster": "default",
+        "taskDefinition": "worker:1",
+        "count": 10
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000007",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLESVCMETR",
+        "arn": "arn:aws:iam::123456789012:user/svc-metrics",
+        "accountId": "123456789012",
+        "accessKeyId": "AKIAEXAMPLESVCMETRC1",
+        "userName": "svc-metrics"
+      },
+      "eventTime": "2026-11-12T04:13:00Z",
+      "eventSource": "ecs.amazonaws.com",
+      "eventName": "RunTask",
+      "awsRegion": "us-west-2",
+      "sourceIPAddress": "203.0.113.120",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": {
+        "cluster": "default",
+        "taskDefinition": "worker:1",
+        "count": 10
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000008",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLESVCMETR",
+        "arn": "arn:aws:iam::123456789012:user/svc-metrics",
+        "accountId": "123456789012",
+        "accessKeyId": "AKIAEXAMPLESVCMETRC1",
+        "userName": "svc-metrics"
+      },
+      "eventTime": "2026-11-12T04:14:00Z",
+      "eventSource": "ec2.amazonaws.com",
+      "eventName": "RunInstances",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.120",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": {
+        "instancesSet": {
+          "items": [
+            {
+              "imageId": "ami-0example",
+              "minCount": 4,
+              "maxCount": 4
+            }
+          ]
+        },
+        "instanceType": "g5.xlarge"
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000009",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true
+    },
+    {
+      "eventVersion": "1.09",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAEXAMPLESVCMETR",
+        "arn": "arn:aws:iam::123456789012:user/svc-metrics",
+        "accountId": "123456789012",
+        "accessKeyId": "AKIAEXAMPLESVCMETRC1",
+        "userName": "svc-metrics"
+      },
+      "eventTime": "2026-11-12T04:15:00Z",
+      "eventSource": "ec2.amazonaws.com",
+      "eventName": "RunInstances",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.120",
+      "userAgent": "aws-cli/2.15.0",
+      "requestParameters": {
+        "instancesSet": {
+          "items": [
+            {
+              "imageId": "ami-0example",
+              "minCount": 8,
+              "maxCount": 8
+            }
+          ]
+        },
+        "instanceType": "g5.xlarge"
+      },
+      "responseElements": null,
+      "eventID": "00000000-0000-0000-0000-000000000010",
+      "eventType": "AwsApiCall",
+      "recipientAccountId": "123456789012",
+      "managementEvent": true,
+      "errorCode": "Client.InstanceLimitExceeded"
+    }
+  ]
+}

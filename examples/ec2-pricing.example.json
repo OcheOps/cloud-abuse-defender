@@ -1,0 +1,23 @@
+{
+  "version": "example-ec2-2026-11",
+  "provider": "aws-ec2",
+  "currency": "USD",
+  "effective_date": "2026-11-01T00:00:00Z",
+  "source": "ILLUSTRATIVE VALUES ONLY - replace with on-demand rates from the AWS EC2 pricing page or your billing agreement",
+  "regions": {
+    "us-east-1": {
+      "g4dn.12xlarge": 4.0,
+      "g5.xlarge": 1.0,
+      "g5.12xlarge": 6.0,
+      "p4d.24xlarge": 30.0,
+      "t3.micro": 0.01
+    },
+    "us-west-2": {
+      "g4dn.12xlarge": 4.0,
+      "p4d.24xlarge": 30.0
+    },
+    "eu-west-1": {
+      "g5.12xlarge": 6.5
+    }
+  }
+}

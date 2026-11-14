@@ -14,10 +14,32 @@ jobs:
         with:
           go-version-file: go.mod
       - name: gofmt
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "Files need gofmt:"; echo "$unformatted"; exit 1
-          fi
+        run: make fmt
       - run: go vet ./...
       - run: go test -race ./...
+      - name: build
+        run: make build && ./bin/cad version
+
+  # Short fuzz runs over the parsers that read untrusted input. Longer runs:
+  # make fuzz FUZZTIME=10m
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - run: make fuzz FUZZTIME=15s
+
+  # Known vulnerabilities reachable from this code, checked against the
+  # latest Go release so fixed standard-library issues are not reported.
+  # govulncheck must be recent enough for that Go release (v1.1.4 crashed on
+  # Go 1.27), so raise this pin when the job fails inside the tool itself.
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: stable
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -43,6 +44,7 @@ func contributor(f Finding, name string) (Contributor, bool) {
 // fails here; after bumping, add the new version's fingerprint.
 var weightsFingerprints = map[string]string{
 	"weights-2026-11-04.1": "0b7867d0fa0cfb0a",
+	"weights-2026-11-13.1": "c5257c657adcbd0e",
 }
 
 func scoringFingerprint() string {
@@ -59,6 +61,7 @@ func scoringFingerprint() string {
 		fmt.Fprintf(&b, "c %s %v %v\n", r.Name, r.Weight, r.AllOf)
 	}
 	fmt.Fprintf(&b, "k %d %d %v %v %v\n", EnumerationBurstThreshold, MultiRegionGPUThreshold, enumerationBurstWeight, multiRegionGPUWeight, DefaultWindow)
+	fmt.Fprintf(&b, "l %v\n", createdIdentityWeight)
 	sum := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(sum[:8])
 }
@@ -119,6 +122,7 @@ func TestEveryIndicatorWeighted(t *testing.T) {
 		cloudtrail.GPUInstanceLaunch, cloudtrail.BulkInstanceLaunch, cloudtrail.QuotaIncreaseRequest,
 		cloudtrail.MonitoringTampering, cloudtrail.BedrockLoggingDisabled, cloudtrail.BedrockModelAccessChange,
 		cloudtrail.CredentialCreation, cloudtrail.AccessDenied, cloudtrail.RootActivity,
+		cloudtrail.AlternateComputeLaunch, cloudtrail.PrivilegeEscalation,
 	} {
 		if _, ok := IndicatorWeights[ind]; !ok {
 			t.Errorf("indicator %s has no weight", ind)
@@ -359,6 +363,9 @@ var fixtureBands = map[string]band{
 	"incident":                   bandContainable,
 	"attack_llmjacking":          bandContainable,
 	"attack_cryptojacking_quiet": bandContainable,
+	// A stolen key creates an admin user and switches to it. Only linking the
+	// two identities gets this past the containment threshold.
+	"attack_identity_pivot": bandContainable,
 	// Probing alone is suspicious but has no resource abuse yet.
 	"attack_key_enumeration": bandAlertOnly,
 }
@@ -413,6 +420,161 @@ func TestFixtureBands(t *testing.T) {
 	for name := range fixtureBands {
 		if !seen[name] {
 			t.Errorf("fixtureBands lists %s but testdata has no such fixture", name)
+		}
+	}
+}
+
+func replayFixture(t *testing.T, name string) []cloudtrail.Event {
+	t.Helper()
+	f, err := os.Open(filepath.Join("..", "cloudtrail", "testdata", name+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	events, err := cloudtrail.Replay(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return events
+}
+
+func TestIdentityPivotIsOneFinding(t *testing.T) {
+	events := replayFixture(t, "attack_identity_pivot")
+	findings, err := Detect(events, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("want one linked finding, got %d: %+v", len(findings), findings)
+	}
+	f := findings[0]
+	if f.Principal != "arn:aws:iam::123456789012:user/support-tool" || f.Confidence != 96 {
+		t.Fatalf("unexpected finding: %s %v", f.Principal, f.Confidence)
+	}
+	if !reflect.DeepEqual(f.LinkedPrincipals, []string{"arn:aws:iam::123456789012:user/svc-metrics"}) {
+		t.Fatalf("linked principals: %v", f.LinkedPrincipals)
+	}
+	for _, name := range []string{"created_identity_activity", "privilege_escalation_with_new_credentials", "evasion_with_resource_abuse"} {
+		if _, ok := contributor(f, name); !ok {
+			t.Errorf("missing %s", name)
+		}
+	}
+	// The denied RunInstances call is not counted as a launch.
+	if !reflect.DeepEqual(f.Launches, []Launch{{Region: "us-east-1", InstanceType: "g5.xlarge", Count: 4}}) {
+		t.Fatalf("launches: %+v", f.Launches)
+	}
+
+	// Without the creation events the two identities stay separate and
+	// neither reaches the containment threshold.
+	var unlinked []cloudtrail.Event
+	for _, ev := range events {
+		ev.TargetUser = ""
+		unlinked = append(unlinked, ev)
+	}
+	split, _ := Detect(unlinked, Options{})
+	if len(split) != 2 || split[0].Confidence >= containmentThreshold {
+		t.Fatalf("unlinked control: %d findings, top %v", len(split), split[0].Confidence)
+	}
+}
+
+func TestIdentityLinkRules(t *testing.T) {
+	mk := func(id string, off time.Duration, who, target, errCode string, inds ...cloudtrail.Indicator) cloudtrail.Event {
+		e := ev(id, off, "arn:aws:iam::123456789012:user/"+who, inds...)
+		e.Service, e.Action, e.TargetUser, e.ErrorCode = "iam", "CreateAccessKey", target, errCode
+		return e
+	}
+	act := func(id string, off time.Duration, who string) cloudtrail.Event {
+		return ev(id, off, "arn:aws:iam::123456789012:user/"+who, cloudtrail.GPUInstanceLaunch)
+	}
+	count := func(events ...cloudtrail.Event) int {
+		fs, err := Detect(events, Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(fs)
+	}
+	if n := count(mk("1", 0, "a", "b", "", cloudtrail.CredentialCreation), act("2", time.Minute, "b")); n != 1 {
+		t.Errorf("created identity must join its creator: %d findings", n)
+	}
+	if n := count(mk("1", time.Minute, "a", "b", "", cloudtrail.CredentialCreation), act("2", 0, "b")); n != 2 {
+		t.Errorf("activity before the creation must not be linked: %d findings", n)
+	}
+	if n := count(mk("1", 0, "a", "b", "AccessDenied", cloudtrail.CredentialCreation), act("2", time.Minute, "b")); n != 2 {
+		t.Errorf("a failed creation must not link: %d findings", n)
+	}
+	if n := count(mk("1", 0, "a", "a", "", cloudtrail.CredentialCreation)); n != 1 {
+		t.Errorf("a key for oneself is not a link: %d findings", n)
+	}
+	// A creates B, B creates C: all three roll up to A; a cycle terminates.
+	if n := count(mk("1", 0, "a", "b", "", cloudtrail.CredentialCreation), mk("2", time.Minute, "b", "c", "", cloudtrail.CredentialCreation),
+		act("3", 2*time.Minute, "c"), mk("4", 3*time.Minute, "c", "a", "", cloudtrail.CredentialCreation)); n != 1 {
+		t.Errorf("chained creations must roll up: %d findings", n)
+	}
+}
+
+func TestSuppressions(t *testing.T) {
+	rules := `{"version":"s1","rules":[{"principal":"arn:aws:iam::*:user/ml-*","indicators":["gpu_instance_launch","quota_increase_request"],"reason":"ML platform trains on GPUs","expires":"2027-01-01T00:00:00Z"}]}`
+	s, err := LoadSuppressions(strings.NewReader(rules))
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := replayFixture(t, "benign_gpu_training_job")
+	now := time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)
+	kept, hits, expired := s.Apply(events, now)
+	if expired != 0 || len(hits) != 2 || hits[0].Indicator != cloudtrail.GPUInstanceLaunch || hits[0].Reason == "" || hits[1].Events != 1 {
+		t.Fatalf("hits %+v expired %d", hits, expired)
+	}
+	if fs, _ := Detect(kept, Options{}); len(fs) != 0 {
+		t.Fatalf("suppressed training job must produce no finding: %+v", fs)
+	}
+	if len(events[0].Indicators) == 0 {
+		t.Fatal("Apply must not modify its input")
+	}
+	// The same rule must not hide an attacker using a different principal...
+	attack := replayFixture(t, "attack_cryptojacking_quiet")
+	if kept, hits, _ := s.Apply(attack, now); len(hits) != 0 || !reflect.DeepEqual(kept, attack) {
+		t.Fatalf("rule matched the wrong principal: %+v", hits)
+	}
+	// ...and stops applying once expired.
+	if _, hits, expired := s.Apply(events, time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)); len(hits) != 0 || expired != 1 {
+		t.Fatalf("expired rule still applied: %+v %d", hits, expired)
+	}
+}
+
+func TestLoadSuppressionsRejects(t *testing.T) {
+	rule := func(body string) string { return `{"version":"s1","rules":[` + body + `]}` }
+	for name, doc := range map[string]string{
+		"not json":       `nope`,
+		"no version":     `{"rules":[]}`,
+		"unknown field":  `{"version":"s","rules":[],"x":1}`,
+		"trailing":       `{"version":"s","rules":[]} {}`,
+		"bare wildcard":  rule(`{"principal":"**","indicators":["access_denied"],"reason":"r","expires":"2027-01-01T00:00:00Z"}`),
+		"no indicators":  rule(`{"principal":"arn:x","indicators":[],"reason":"r","expires":"2027-01-01T00:00:00Z"}`),
+		"no reason":      rule(`{"principal":"arn:x","indicators":["access_denied"],"reason":" ","expires":"2027-01-01T00:00:00Z"}`),
+		"no expiry":      rule(`{"principal":"arn:x","indicators":["access_denied"],"reason":"r"}`),
+		"unknown":        rule(`{"principal":"arn:x","indicators":["nope"],"reason":"r","expires":"2027-01-01T00:00:00Z"}`),
+		"evasion signal": rule(`{"principal":"arn:x","indicators":["monitoring_tampering"],"reason":"r","expires":"2027-01-01T00:00:00Z"}`),
+		"bedrock logs":   rule(`{"principal":"arn:x","indicators":["bedrock_logging_disabled"],"reason":"r","expires":"2027-01-01T00:00:00Z"}`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := LoadSuppressions(strings.NewReader(doc)); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("want ErrInvalid, got %v", err)
+			}
+		})
+	}
+}
+
+func TestWildcardMatch(t *testing.T) {
+	for _, tc := range []struct {
+		pattern, s string
+		want       bool
+	}{
+		{"abc", "abc", true}, {"abc", "abcd", false}, {"a*", "abc", true}, {"*c", "abc", true},
+		{"a*c", "abc", true}, {"a*c", "ab", false}, {"arn:*:user/ml-*", "arn:aws:iam::1:user/ml-x", true},
+		{"arn:*:user/ml-*", "arn:aws:iam::1:role/ml-x", false}, {"a*b*c", "a-b-b-c", true}, {"a*bc", "abcabd", false},
+	} {
+		if got := wildcardMatch(tc.pattern, tc.s); got != tc.want {
+			t.Errorf("wildcardMatch(%q, %q) = %v", tc.pattern, tc.s, got)
 		}
 	}
 }

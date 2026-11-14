@@ -12,12 +12,17 @@ Agents/telemetry -> ingestion -> policy engine -> incident store -> response orc
 - Sensitive process arguments contain tokens or secrets.
 - Delayed billing leads to inaccurate loss forecasts.
 - Automated response causes larger damage than the incident itself.
+- An attacker creates a new identity and switches to it, so no single identity looks suspicious enough.
+- A suppression rule for a trusted principal becomes cover for an attacker who compromises that principal.
+- Someone with write access to the evidence log forges approvals to satisfy the quorum alone.
 - Alert channels (Slack, webhooks) leak incident detail or the webhook URL itself, letting outsiders read or forge alerts.
 
 ## Required protections before live execution
 - Read-only collectors, mTLS/signatures for telemetry, RBAC, tamper-evident audit logging.
 - Minimize/redact secrets and short retention of sensitive evidence.
 - Hash-chained evidence records, with record hashes copied into alerts so a rebuilt or truncated log is detectable.
+- Follow created identities back to their creator; keep suppression rules narrow, expiring and unable to hide evasion.
+- Signed approvals verified against an operators file stored where approvers cannot edit it.
 - Treat alert webhook URLs as secrets (environment only, https only, never logged) and send third-party channels only the minimum needed to triage.
 - Require corroborating security indicators, not spending alone.
 - Human approval by default; explicit policy-scoped opt-in for any automatic action.

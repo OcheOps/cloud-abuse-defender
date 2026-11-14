@@ -1,6 +1,8 @@
 package host
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -89,6 +91,13 @@ type Finding struct {
 	CPUPercent   float64       `json:"cpu_percent"`
 	Contributors []Contributor `json:"contributors"`
 	Confidence   float64       `json:"confidence"`
+}
+
+// IncidentID is a stable identifier for a process on a host across
+// snapshots: the same host, PID, name and executable give the same ID.
+func (f Finding) IncidentID() string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("host|%s|%d|%s|%s", f.Host, f.PID, f.Name, f.Exe)))
+	return "inc_" + hex.EncodeToString(sum[:8])
 }
 
 func exeBase(exe string) string {

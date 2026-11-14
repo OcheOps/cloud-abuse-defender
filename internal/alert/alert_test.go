@@ -14,6 +14,7 @@ import (
 
 	"github.com/OcheOps/cloud-abuse-defender/internal/cost"
 	"github.com/OcheOps/cloud-abuse-defender/internal/detect"
+	"github.com/OcheOps/cloud-abuse-defender/internal/host"
 	"github.com/OcheOps/cloud-abuse-defender/internal/policy"
 )
 
@@ -291,5 +292,55 @@ func TestAlertIncidentAndEvidence(t *testing.T) {
 	hook, _ := Render(FormatWebhook, a)
 	if !strings.Contains(string(hook), `"evidence_hash":"`+a.EvidenceHash+`"`) {
 		t.Fatalf("webhook payload must carry the full hash: %s", hook)
+	}
+}
+
+func TestFromHost(t *testing.T) {
+	hf := host.Finding{Host: "web-02", PID: 4401, Name: "xm<rig>", Exe: "/tmp/.x/xmrig (deleted)",
+		Cmdline: "/tmp/.x/xmrig -o stratum+tcp://203.0.113.77:3333", Confidence: 99.2,
+		Contributors: []host.Contributor{
+			{Indicator: host.HighCPU, Weight: 0.15, Detail: "395% CPU"},
+			{Indicator: host.StratumURL, Weight: 0.8, Detail: "command line uses stratum+tcp://"},
+		}}
+	a := FromHost(hf, t0, t0.Add(time.Minute))
+	if a.Source != SourceHost || a.IncidentID != hf.IncidentID() || a.Principal != "host:web-02 process:xm<rig> pid:4401" ||
+		!a.First.Equal(t0) || a.Evidence[0].Name != "stratum_url" {
+		t.Fatalf("unexpected alert: %+v", a)
+	}
+	for _, format := range []Format{FormatSlack, FormatWebhook} {
+		body, err := Render(format, a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(body), "203.0.113.77") || strings.Contains(string(body), "/tmp/.x") {
+			t.Fatalf("%s host alert leaks the command line or executable path: %s", format, body)
+		}
+	}
+	body, _ := Render(FormatSlack, a)
+	var msg slackPayload
+	if err := json.Unmarshal(body, &msg); err != nil {
+		t.Fatal(err)
+	}
+	text := msg.Blocks[1].Text.Text
+	if !strings.Contains(text, "*Process:* `host:web-02 process:xm&lt;rig&gt; pid:4401`") || strings.Contains(text, "Accounts") {
+		t.Fatalf("host Slack layout: %s", text)
+	}
+	other := hf
+	other.PID = 4402
+	if other.IncidentID() == hf.IncidentID() {
+		t.Fatal("different PIDs must have different incident IDs")
+	}
+}
+
+func TestCloudTrailAlertShowsLinkedIdentities(t *testing.T) {
+	f := finding()
+	f.LinkedPrincipals = []string{"arn:aws:iam::123456789012:user/svc-metrics"}
+	a := FromFinding(f, nil, nil, t0)
+	if a.Source != SourceCloudTrail {
+		t.Fatalf("source %q", a.Source)
+	}
+	body, _ := Render(FormatSlack, a)
+	if !strings.Contains(string(body), "Created identities") || !strings.Contains(string(body), "svc-metrics") {
+		t.Fatalf("linked identities missing: %s", body)
 	}
 }

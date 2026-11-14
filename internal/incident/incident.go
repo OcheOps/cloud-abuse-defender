@@ -17,6 +17,7 @@
 package incident
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -92,6 +93,14 @@ type FindingData struct {
 	// containment for this finding. It is fixed when the finding is
 	// recorded, so approvers cannot lower it.
 	ApprovalsRequired int `json:"approvals_required,omitempty"`
+	// RequireSignedApprovals means an approval only counts when it carries a
+	// valid signature from a trusted operator key. Like the quorum, it is
+	// fixed when the finding is recorded.
+	RequireSignedApprovals bool `json:"require_signed_approvals,omitempty"`
+	// EC2PricingVersion and SuppressionsVersion identify the other inputs
+	// behind the decision, when they were used.
+	EC2PricingVersion   string `json:"ec2_pricing_version,omitempty"`
+	SuppressionsVersion string `json:"suppressions_version,omitempty"`
 }
 
 // NotificationData records a delivery attempt. The webhook URL is never recorded.
@@ -120,6 +129,9 @@ type ApprovalData struct {
 	Principal     string    `json:"principal"`
 	FindingRecord string    `json:"finding_record"`
 	ExpiresAt     time.Time `json:"expires_at"`
+	// Signature is the operator's Ed25519 signature over every other field,
+	// base64-encoded. See SignApproval.
+	Signature string `json:"signature,omitempty"`
 }
 
 // RejectionData declines containment for one finding record.
@@ -166,6 +178,18 @@ type Status struct {
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	// DecisionRecord is the rejection or revocation behind those states.
 	DecisionRecord string `json:"decision_record,omitempty"`
+	// SignedApprovalsRequired mirrors the finding record. When it is set,
+	// UnverifiedApprovals counts approvals that were ignored because their
+	// signature is missing, invalid or from an operator who is not trusted.
+	SignedApprovalsRequired bool `json:"signed_approvals_required,omitempty"`
+	UnverifiedApprovals     int  `json:"unverified_approvals,omitempty"`
+}
+
+// Reviewer evaluates incidents against a set of trusted operator keys. The
+// zero value trusts no keys, which is enough for findings that do not
+// require signed approvals.
+type Reviewer struct {
+	Operators Operators
 }
 
 // requiredApprovals returns the quorum recorded with the finding. Findings
@@ -237,7 +261,7 @@ func (r *round) operators() int {
 	return len(seen)
 }
 
-func status(id string, ir *incidentRecords, now time.Time) (Status, error) {
+func (rv Reviewer) status(id string, ir *incidentRecords, now time.Time) (Status, error) {
 	s := Status{
 		IncidentID:        id,
 		Principal:         ir.findingData.Finding.Principal,
@@ -245,6 +269,8 @@ func status(id string, ir *incidentRecords, now time.Time) (Status, error) {
 		Decision:          ir.findingData.Decision,
 		FindingRecord:     ir.finding.Hash,
 		RequiredApprovals: requiredApprovals(ir.findingData),
+
+		SignedApprovalsRequired: ir.findingData.RequireSignedApprovals,
 	}
 	if d := ir.findingData.Decision; d == nil || !d.EligibleForContainment {
 		s.State = StateNotEligible
@@ -263,6 +289,10 @@ func status(id string, ir *incidentRecords, now time.Time) (Status, error) {
 				return s, err
 			}
 			if ap.FindingRecord != ir.finding.Hash {
+				continue
+			}
+			if s.SignedApprovalsRequired && !rv.Operators.verify(ap) {
+				s.UnverifiedApprovals++
 				continue
 			}
 			if len(cur.approvals) > 0 && !rec.Time.Before(cur.expiresAt) {
@@ -323,13 +353,18 @@ func status(id string, ir *incidentRecords, now time.Time) (Status, error) {
 
 // Summarize returns the status of every incident in the log, ordered by incident ID.
 func Summarize(records []evidence.Record, now time.Time) ([]Status, error) {
+	return Reviewer{}.Summarize(records, now)
+}
+
+// Summarize returns the status of every incident in the log, ordered by incident ID.
+func (rv Reviewer) Summarize(records []evidence.Record, now time.Time) ([]Status, error) {
 	byID, err := index(records)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]Status, 0, len(byID))
 	for id, ir := range byID {
-		s, err := status(id, ir, now)
+		s, err := rv.status(id, ir, now)
 		if err != nil {
 			return nil, err
 		}
@@ -341,6 +376,11 @@ func Summarize(records []evidence.Record, now time.Time) ([]Status, error) {
 
 // StatusOf returns one incident's status.
 func StatusOf(records []evidence.Record, id string, now time.Time) (Status, error) {
+	return Reviewer{}.StatusOf(records, id, now)
+}
+
+// StatusOf returns one incident's status.
+func (rv Reviewer) StatusOf(records []evidence.Record, id string, now time.Time) (Status, error) {
 	byID, err := index(records)
 	if err != nil {
 		return Status{}, err
@@ -349,7 +389,7 @@ func StatusOf(records []evidence.Record, id string, now time.Time) (Status, erro
 	if !ok {
 		return Status{}, fmt.Errorf("%w: no finding recorded for incident %q", ErrRefused, id)
 	}
-	return status(id, ir, now)
+	return rv.status(id, ir, now)
 }
 
 func validText(field, v string, max int) error {
@@ -383,6 +423,9 @@ type ApproveRequest struct {
 	Principal string
 	Action    Action
 	TTL       time.Duration
+	// Signer is the operator's private key. It is required when the finding
+	// requires signed approvals, and must match the operator's trusted key.
+	Signer ed25519.PrivateKey
 }
 
 // Approve validates the request against the incident's current state and
@@ -390,6 +433,12 @@ type ApproveRequest struct {
 // approved, the request joins that round: it must name the same action and
 // come from an operator, and OS account, not already in the round.
 func Approve(records []evidence.Record, req ApproveRequest, now time.Time) (ApprovalData, error) {
+	return Reviewer{}.Approve(records, req, now)
+}
+
+// Approve validates the request as the package-level Approve does, checking
+// signatures against the reviewer's trusted operators.
+func (rv Reviewer) Approve(records []evidence.Record, req ApproveRequest, now time.Time) (ApprovalData, error) {
 	if err := req.validate(); err != nil {
 		return ApprovalData{}, err
 	}
@@ -399,9 +448,20 @@ func Approve(records []evidence.Record, req ApproveRequest, now time.Time) (Appr
 	if req.TTL <= 0 || req.TTL > MaxApprovalTTL {
 		return ApprovalData{}, fmt.Errorf("%w: expiry must be greater than 0 and at most %s", ErrRefused, MaxApprovalTTL)
 	}
-	s, err := StatusOf(records, req.IncidentID, now)
+	s, err := rv.StatusOf(records, req.IncidentID, now)
 	if err != nil {
 		return ApprovalData{}, err
+	}
+	if s.SignedApprovalsRequired {
+		pub, trusted := rv.Operators[req.Operator]
+		switch {
+		case !trusted:
+			return ApprovalData{}, fmt.Errorf("%w: incident %s requires signed approvals and %q is not in the trusted operators file", ErrRefused, req.IncidentID, req.Operator)
+		case req.Signer == nil:
+			return ApprovalData{}, fmt.Errorf("%w: incident %s requires signed approvals; sign with the operator's key", ErrRefused, req.IncidentID)
+		case !pub.Equal(req.Signer.Public()):
+			return ApprovalData{}, fmt.Errorf("%w: the signing key is not the trusted key for operator %q", ErrRefused, req.Operator)
+		}
 	}
 	if req.Principal != s.Principal {
 		return ApprovalData{}, fmt.Errorf("%w: principal %q does not match incident %s (%s)", ErrRefused, req.Principal, req.IncidentID, s.Principal)
@@ -416,7 +476,9 @@ func Approve(records []evidence.Record, req ApproveRequest, now time.Time) (Appr
 			if a.Operator == req.Operator {
 				return ApprovalData{}, fmt.Errorf("%w: %s already approved incident %s; a different operator must approve", ErrRefused, req.Operator, req.IncidentID)
 			}
-			if a.RecordedBy != "" && a.RecordedBy == req.RecordedBy {
+			// With signed approvals the key proves who approved, so a shared
+			// OS account (a bastion, for example) is not a reason to refuse.
+			if !s.SignedApprovalsRequired && a.RecordedBy != "" && a.RecordedBy == req.RecordedBy {
 				return ApprovalData{}, fmt.Errorf("%w: OS account %s already recorded an approval for incident %s; the next approval must come from another account", ErrRefused, req.RecordedBy, req.IncidentID)
 			}
 		}
@@ -425,22 +487,34 @@ func Approve(records []evidence.Record, req ApproveRequest, now time.Time) (Appr
 	default:
 		return ApprovalData{}, fmt.Errorf("%w: incident %s is already %s; revoke it first or wait for a newer finding", ErrRefused, req.IncidentID, s.State)
 	}
-	return ApprovalData{
+	data := ApprovalData{
 		Decider:       req.Decider,
 		Action:        req.Action,
 		Principal:     s.Principal,
 		FindingRecord: s.FindingRecord,
 		ExpiresAt:     now.UTC().Add(req.TTL),
-	}, nil
+	}
+	if req.Signer != nil {
+		if data.Signature, err = SignApproval(data, req.Signer); err != nil {
+			return ApprovalData{}, err
+		}
+	}
+	return data, nil
 }
 
 // Reject validates a rejection of the incident's latest finding. One
 // operator can reject, including while an approval round is incomplete.
 func Reject(records []evidence.Record, id string, d Decider, now time.Time) (RejectionData, error) {
+	return Reviewer{}.Reject(records, id, d, now)
+}
+
+// Reject validates a rejection. Rejections are never required to be signed:
+// stopping containment must stay easy.
+func (rv Reviewer) Reject(records []evidence.Record, id string, d Decider, now time.Time) (RejectionData, error) {
 	if err := d.validate(); err != nil {
 		return RejectionData{}, err
 	}
-	s, err := StatusOf(records, id, now)
+	s, err := rv.StatusOf(records, id, now)
 	if err != nil {
 		return RejectionData{}, err
 	}
@@ -457,10 +531,15 @@ func Reject(records []evidence.Record, id string, d Decider, now time.Time) (Rej
 // Revoke validates withdrawing the incident's current approval round, whether
 // complete or partial. One operator can revoke.
 func Revoke(records []evidence.Record, id string, d Decider, now time.Time) (RevocationData, error) {
+	return Reviewer{}.Revoke(records, id, d, now)
+}
+
+// Revoke validates a revocation. Like rejections, revocations need no signature.
+func (rv Reviewer) Revoke(records []evidence.Record, id string, d Decider, now time.Time) (RevocationData, error) {
 	if err := d.validate(); err != nil {
 		return RevocationData{}, err
 	}
-	s, err := StatusOf(records, id, now)
+	s, err := rv.StatusOf(records, id, now)
 	if err != nil {
 		return RevocationData{}, err
 	}
